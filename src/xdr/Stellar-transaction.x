@@ -541,7 +541,7 @@ struct GeneralPreconditions {
 enum PreconditionType {
     PRECOND_NONE = 0,
     PRECOND_TIME = 1,
-    PRECOND_GENERAL = 2,
+    PRECOND_GENERAL = 2
 };
 
 union Preconditions switch (PreconditionType type) {
