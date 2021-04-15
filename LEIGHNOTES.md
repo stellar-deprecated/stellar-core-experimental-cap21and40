@@ -43,3 +43,11 @@ curl 'http://localhost:11626/upgrades?mode=set&upgradetime=1970-01-01T00:00:00Z&
 ### Submit tx
 
 curl -G localhost:11626/tx --data-urlencode "blob=$(stc -c <stc-tx-file>)"
+
+### Helpful queries for monitoring
+
+\watch 5 "select accountid,balance,seqnum,numsubentries from accounts order by lastmodified;"
+
+\watch 5 "select txid,ledgerseq,txresult from txhistory;"
+
+\watch 5 "select * from claimablebalance";
