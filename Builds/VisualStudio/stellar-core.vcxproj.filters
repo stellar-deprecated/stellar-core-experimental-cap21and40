@@ -300,6 +300,9 @@
     <ClCompile Include="..\..\src\work\WorkSequence.cpp">
       <Filter>work</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\work\WorkWithCallback.cpp">
+      <Filter>work</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\src\util\StatusManager.cpp">
       <Filter>util</Filter>
     </ClCompile>
@@ -549,6 +552,9 @@
     <ClCompile Include="..\..\src\ledger\CheckpointRange.cpp">
       <Filter>ledger</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\ledger\FlushAndRotateMetaDebugWork.cpp">
+      <Filter>ledger</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\src\ledger\LedgerHeaderUtils.cpp">
       <Filter>ledger</Filter>
     </ClCompile>
@@ -690,6 +696,9 @@
     <ClCompile Include="..\..\src\ledger\test\LiabilitiesTests.cpp">
       <Filter>ledger\tests</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\main\test\ApplicationUtilsTests.cpp">
+      <Filter>main\tests</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\src\main\test\CommandHandlerTests.cpp">
       <Filter>main\tests</Filter>
     </ClCompile>
@@ -697,6 +706,9 @@
       <Filter>main\tests</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\main\test\ExternalQueueTests.cpp">
+      <Filter>main\tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\main\test\SelfCheckTests.cpp">
       <Filter>main\tests</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\util\test\CacheTests.cpp">
@@ -1002,6 +1014,9 @@
     <ClCompile Include="..\..\src\ledger\InMemoryLedgerTxnRoot.cpp">
       <Filter>ledger</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\ledger\InMemoryLedgerTxn.cpp">
+      <Filter>ledger</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\src\ledger\test\LedgerCloseMetaStreamTests.cpp">
       <Filter>ledger\tests</Filter>
     </ClCompile>
@@ -1170,6 +1185,12 @@
     <ClCompile Include="..\..\src\herder\SurgePricingUtils.cpp">
       <Filter>herder</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\historywork\CheckSingleLedgerHeaderWork.cpp">
+      <Filter>historyWork</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\ledger\LedgerTxnLiquidityPoolSQL.cpp">
+      <Filter>ledger</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\lib\util\cpptoml.h">
@@ -1328,6 +1349,9 @@
     <ClInclude Include="..\..\src\work\WorkSequence.h">
       <Filter>work</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\work\WorkWithCallback.h">
+      <Filter>work</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\util\StatusManager.h">
       <Filter>util</Filter>
     </ClInclude>
@@ -1340,7 +1364,7 @@
     <ClInclude Include="..\..\src\test\TestUtils.h">
       <Filter>test</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\src\util\Algoritm.h">
+    <ClInclude Include="..\..\src\util\Algorithm.h">
       <Filter>util</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\util\SecretValue.h">
@@ -1616,6 +1640,9 @@
     <ClInclude Include="..\..\src\ledger\CheckpointRange.h">
       <Filter>ledger</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\ledger\FlushAndRotateMetaDebugWork.h">
+      <Filter>ledger</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\ledger\LedgerHashUtils.h">
       <Filter>ledger</Filter>
     </ClInclude>
@@ -1883,6 +1910,9 @@
     <ClInclude Include="..\..\src\ledger\InMemoryLedgerTxnRoot.h">
       <Filter>ledger</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\ledger\InMemoryLedgerTxn.h">
+      <Filter>ledger</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\crypto\Curve25519.h">
       <Filter>crypto</Filter>
     </ClInclude>
@@ -2038,6 +2068,9 @@
     </ClInclude>
     <ClInclude Include="..\..\src\herder\SurgePricingUtils.h">
       <Filter>herder</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\historywork\CheckSingleLedgerHeaderWork.h">
+      <Filter>historyWork</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

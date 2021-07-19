@@ -5,6 +5,7 @@
 // of this distribution or at http://www.apache.org/licenses/LICENSE-2.0
 
 #include "xdr/Stellar-ledger-entries.h"
+#include "xdr/Stellar-transaction.h"
 #include <algorithm>
 
 namespace stellar
@@ -18,6 +19,7 @@ class LedgerTxnEntry;
 class LedgerTxnHeader;
 class TrustLineWrapper;
 class InternalLedgerKey;
+struct ClaimAtom;
 struct LedgerHeader;
 struct LedgerKey;
 struct TransactionEnvelope;
@@ -49,6 +51,7 @@ LedgerKey trustlineKey(AccountID const& accountID, Asset const& asset);
 LedgerKey offerKey(AccountID const& sellerID, uint64_t offerID);
 LedgerKey dataKey(AccountID const& accountID, std::string const& dataName);
 LedgerKey claimableBalanceKey(ClaimableBalanceID const& balanceID);
+LedgerKey liquidityPoolKey(PoolID const& poolID);
 InternalLedgerKey sponsorshipKey(AccountID const& sponsoredID);
 InternalLedgerKey sponsorshipCounterKey(AccountID const& sponsoringID);
 
@@ -153,8 +156,8 @@ int64_t getSellingLiabilities(LedgerHeader const& header,
 int64_t getSellingLiabilities(LedgerTxnHeader const& header,
                               LedgerTxnEntry const& offer);
 
-uint64_t getStartingSequenceNumber(uint32_t ledgerSeq);
-uint64_t getStartingSequenceNumber(LedgerTxnHeader const& header);
+SequenceNumber getStartingSequenceNumber(uint32_t ledgerSeq);
+SequenceNumber getStartingSequenceNumber(LedgerTxnHeader const& header);
 
 bool isAuthorized(LedgerEntry const& le);
 bool isAuthorized(LedgerTxnEntry const& entry);
@@ -172,6 +175,7 @@ bool isClawbackEnabledOnTrustline(LedgerTxnEntry const& entry);
 bool isClawbackEnabledOnAccount(LedgerEntry const& entry);
 bool isClawbackEnabledOnAccount(LedgerTxnEntry const& entry);
 bool isClawbackEnabledOnAccount(ConstLedgerTxnEntry const& entry);
+bool isClawbackEnabledOnClaimableBalance(ClaimableBalanceEntry const& entry);
 bool isClawbackEnabledOnClaimableBalance(LedgerEntry const& entry);
 
 bool isImmutableAuth(LedgerTxnEntry const& entry);
@@ -204,4 +208,14 @@ bool claimableBalanceFlagIsValid(ClaimableBalanceEntry const& cb);
 void removeOffersByAccountAndAsset(AbstractLedgerTxn& ltx,
                                    AccountID const& account,
                                    Asset const& asset);
+
+ClaimAtom makeClaimAtom(uint32_t ledgerVersion, AccountID const& accountID,
+                        int64_t offerID, Asset const& wheat,
+                        int64_t numWheatReceived, Asset const& sheep,
+                        int64_t numSheepSend);
+
+TrustLineAsset assetToTrustLineAsset(Asset const& asset);
+TrustLineAsset
+changeTrustAssetToTrustLineAsset(ChangeTrustAsset const& ctAsset);
+ChangeTrustAsset assetToChangeTrustAsset(Asset const& asset);
 }

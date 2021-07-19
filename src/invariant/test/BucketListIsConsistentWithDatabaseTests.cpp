@@ -32,16 +32,13 @@ namespace BucketListIsConsistentWithDatabaseTests
 struct BucketListGenerator
 {
     VirtualClock mClock;
-    VirtualClock mApplyClock;
     Application::pointer mAppGenerate;
-    Application::pointer mAppApply;
     uint32_t mLedgerSeq;
     UnorderedSet<LedgerKey> mLiveKeys;
 
   public:
     BucketListGenerator()
         : mAppGenerate(createTestApplication(mClock, getTestConfig(0)))
-        , mAppApply(createTestApplication(mApplyClock, getTestConfig(1)))
         , mLedgerSeq(1)
     {
         auto skey = SecretKey::fromSeed(mAppGenerate->getNetworkID());
@@ -55,15 +52,24 @@ struct BucketListGenerator
 
     template <typename T = ApplyBucketsWork, typename... Args>
     void
-    applyBuckets(Args&&... args)
+    applyBuckets(Application::pointer app, Args&&... args)
     {
         std::map<std::string, std::shared_ptr<Bucket>> buckets;
-        auto has = getHistoryArchiveState();
-        has.prepareForPublish(*mAppApply);
-        auto& wm = mAppApply->getWorkScheduler();
+        auto has = getHistoryArchiveState(app);
+        auto& wm = app->getWorkScheduler();
         wm.executeWork<T>(buckets, has,
-                          mAppApply->getConfig().LEDGER_PROTOCOL_VERSION,
+                          app->getConfig().LEDGER_PROTOCOL_VERSION,
                           std::forward<Args>(args)...);
+    }
+
+    template <typename T = ApplyBucketsWork, typename... Args>
+    void
+    applyBuckets(Args&&... args)
+    {
+        VirtualClock clock;
+        Application::pointer app =
+            createTestApplication(clock, getTestConfig(1));
+        applyBuckets<T, Args...>(app, std::forward<Args>(args)...);
     }
 
     void
@@ -149,10 +155,10 @@ struct BucketListGenerator
     }
 
     HistoryArchiveState
-    getHistoryArchiveState()
+    getHistoryArchiveState(Application::pointer app)
     {
         auto& blGenerate = mAppGenerate->getBucketManager().getBucketList();
-        auto& bmApply = mAppApply->getBucketManager();
+        auto& bmApply = app->getBucketManager();
         MergeCounters mergeCounters;
         LedgerTxn ltx(mAppGenerate->getLedgerTxnRoot(), false);
         auto vers = ltx.loadHeader().current().ledgerVersion;
@@ -282,8 +288,8 @@ class ApplyBucketsWorkAddEntry : public ApplyBucketsWork
         Application& app,
         std::map<std::string, std::shared_ptr<Bucket>> const& buckets,
         HistoryArchiveState const& applyState, uint32_t maxProtocolVersion,
-        LedgerEntry const& entry)
-        : ApplyBucketsWork(app, buckets, applyState, maxProtocolVersion)
+        std::function<bool(LedgerEntryType)> filter, LedgerEntry const& entry)
+        : ApplyBucketsWork(app, buckets, applyState, maxProtocolVersion, filter)
         , mEntry(entry)
         , mAdded{false}
     {
@@ -429,6 +435,17 @@ class ApplyBucketsWorkModifyEntry : public ApplyBucketsWork
         entry.data.claimableBalance().balanceID = cb.balanceID;
     }
 
+    void
+    modifyLiquidityPoolEntry(LedgerEntry& entry)
+    {
+        LiquidityPoolEntry const& lp = mEntry.data.liquidityPool();
+        entry.lastModifiedLedgerSeq = mEntry.lastModifiedLedgerSeq;
+        entry.data.liquidityPool() =
+            LedgerTestUtils::generateValidLiquidityPoolEntry(5);
+
+        entry.data.liquidityPool().liquidityPoolID = lp.liquidityPoolID;
+    }
+
   public:
     ApplyBucketsWorkModifyEntry(
         Application& app,
@@ -467,6 +484,9 @@ class ApplyBucketsWorkModifyEntry : public ApplyBucketsWork
                     break;
                 case CLAIMABLE_BALANCE:
                     modifyClaimableBalanceEntry(entry.current());
+                    break;
+                case LIQUIDITY_POOL:
+                    modifyLiquidityPoolEntry(entry.current());
                     break;
                 default:
                     REQUIRE(false);
@@ -514,18 +534,6 @@ TEST_CASE("BucketListIsConsistentWithDatabase empty ledgers",
     };
 
     EmptyBucketListGenerator blg;
-    blg.generateLedgers(100);
-    REQUIRE_NOTHROW(blg.applyBuckets());
-}
-
-TEST_CASE("BucketListIsConsistentWithDatabase multiple applies",
-          "[invariant][bucketlistconsistent]")
-{
-    BucketListGenerator blg;
-    blg.generateLedgers(100);
-    REQUIRE_NOTHROW(blg.applyBuckets());
-    blg.generateLedgers(100);
-    REQUIRE_NOTHROW(blg.applyBuckets());
     blg.generateLedgers(100);
     REQUIRE_NOTHROW(blg.applyBuckets());
 }
@@ -584,19 +592,41 @@ TEST_CASE("BucketListIsConsistentWithDatabase test root account",
 TEST_CASE("BucketListIsConsistentWithDatabase added entries",
           "[invariant][bucketlistconsistent][acceptance]")
 {
-    for (size_t nTests = 0; nTests < 40; ++nTests)
-    {
-        BucketListGenerator blg;
-        blg.generateLedgers(100);
+    auto runTest = [](bool withFilter) {
+        for (size_t nTests = 0; nTests < 40; ++nTests)
+        {
+            BucketListGenerator blg;
+            blg.generateLedgers(100);
 
-        std::uniform_int_distribution<uint32_t> addAtLedgerDist(2,
-                                                                blg.mLedgerSeq);
-        auto le = LedgerTestUtils::generateValidLedgerEntry(5);
-        le.lastModifiedLedgerSeq = addAtLedgerDist(gRandomEngine);
+            std::uniform_int_distribution<uint32_t> addAtLedgerDist(
+                2, blg.mLedgerSeq);
+            auto le = LedgerTestUtils::generateValidLedgerEntry(5);
+            le.lastModifiedLedgerSeq = addAtLedgerDist(gRandomEngine);
 
-        REQUIRE_THROWS_AS(blg.applyBuckets<ApplyBucketsWorkAddEntry>(le),
-                          InvariantDoesNotHold);
-    }
+            if (!withFilter)
+            {
+                auto filter = [](auto) { return true; };
+                REQUIRE_THROWS_AS(
+                    blg.applyBuckets<ApplyBucketsWorkAddEntry>(filter, le),
+                    InvariantDoesNotHold);
+            }
+            else
+            {
+                auto filter = [&](auto let) { return let != le.data.type(); };
+                REQUIRE_NOTHROW(
+                    blg.applyBuckets<ApplyBucketsWorkAddEntry>(filter, le));
+            }
+        }
+    };
+
+    runTest(true);
+
+    // This tests the filtering behavior of BucketListIsConsistentWithDatabase
+    // because the bucket apply will not add anything of the specified
+    // LedgerEntryType, but we will inject an additional LedgerEntry of that
+    // type anyway. But it shouldn't throw because the invariant isn't looking
+    // for those changes.
+    runTest(false);
 }
 
 TEST_CASE("BucketListIsConsistentWithDatabase deleted entries",
@@ -771,7 +801,6 @@ TEST_CASE("BucketListIsConsistentWithDatabase merged LIVEENTRY and DEADENTRY",
             MergeBucketListGenerator blg(static_cast<LedgerEntryType>(t));
             auto& blGenerate =
                 blg.mAppGenerate->getBucketManager().getBucketList();
-            auto& blApply = blg.mAppApply->getBucketManager().getBucketList();
 
             blg.generateLedgers(100);
             if (!blg.mSelected)
@@ -786,9 +815,14 @@ TEST_CASE("BucketListIsConsistentWithDatabase merged LIVEENTRY and DEADENTRY",
             BucketEntry init(INITENTRY);
             init.liveEntry() = *blg.mSelected;
 
-            REQUIRE_NOTHROW(blg.applyBuckets());
-            REQUIRE(exists(*blg.mAppGenerate, *blg.mSelected));
-            REQUIRE(exists(*blg.mAppApply, *blg.mSelected));
+            {
+                VirtualClock clock;
+                Application::pointer appApply =
+                    createTestApplication(clock, getTestConfig(1));
+                REQUIRE_NOTHROW(blg.applyBuckets(appApply));
+                REQUIRE(exists(*blg.mAppGenerate, *blg.mSelected));
+                REQUIRE(exists(*appApply, *blg.mSelected));
+            }
 
             blg.generateLedgers(10);
             REQUIRE(doesBucketListContain(blGenerate, dead));
@@ -800,11 +834,18 @@ TEST_CASE("BucketListIsConsistentWithDatabase merged LIVEENTRY and DEADENTRY",
             REQUIRE(!(doesBucketListContain(blGenerate, live) ||
                       doesBucketListContain(blGenerate, init)));
             REQUIRE(!exists(*blg.mAppGenerate, *blg.mSelected));
-            REQUIRE_NOTHROW(blg.applyBuckets());
-            REQUIRE(!doesBucketListContain(blApply, dead));
-            REQUIRE(!(doesBucketListContain(blApply, live) ||
-                      doesBucketListContain(blApply, init)));
-            REQUIRE(!exists(*blg.mAppApply, *blg.mSelected));
+
+            {
+                VirtualClock clock;
+                Application::pointer appApply =
+                    createTestApplication(clock, getTestConfig(1));
+                REQUIRE_NOTHROW(blg.applyBuckets(appApply));
+                auto& blApply = appApply->getBucketManager().getBucketList();
+                REQUIRE(!doesBucketListContain(blApply, dead));
+                REQUIRE(!(doesBucketListContain(blApply, live) ||
+                          doesBucketListContain(blApply, init)));
+                REQUIRE(!exists(*appApply, *blg.mSelected));
+            }
 
             ++nTests;
         }

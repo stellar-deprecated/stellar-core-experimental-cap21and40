@@ -53,6 +53,18 @@ It then follows that:
 
 # List of releases
 
+## v17.0.0 (2021-04-26)
+
+* `Ledger` - protocol - CAP0035 - Asset Clawback
+
+## v16.0.0 (2021-04-09)
+
+* `Ledger` - protocol - fixed potential local state corruption when loading offers that could potentially corrupt sponsorships. Upgrade fixed offer 289733046 corrupted when constructing ledger 34793621 on the public network.
+
+## v15.5.0 (2021-04-07)
+
+* `Ledger` - work around a local corruption issues when loading offers that would lead to Offers potentially getting corrupt sponsorships.
+
 ## v15.0.0 (2020-10-27)
 
 * `Ledger` - protocol - CAP0023 - Fixed `LedgerKey` input validation issue
@@ -261,7 +273,7 @@ of a signer to more than 255.
 
 * `Ledger` - protocol - updated protocol version to 5
 
-* `Ledger` - protocol - don't allow merging accounts from non-existant accounts (bad fix)
+* `Ledger` - protocol - don't allow merging accounts from non-existent accounts (bad fix)
 
 ## v0.6.1 (2017-03-07)
 

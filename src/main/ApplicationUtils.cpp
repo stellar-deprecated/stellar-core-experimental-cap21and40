@@ -7,12 +7,15 @@
 #include "bucket/BucketManager.h"
 #include "catchup/ApplyBucketsWork.h"
 #include "catchup/CatchupConfiguration.h"
+#include "crypto/Hex.h"
 #include "database/Database.h"
 #include "herder/Herder.h"
 #include "history/HistoryArchive.h"
 #include "history/HistoryArchiveManager.h"
 #include "history/HistoryArchiveReportWork.h"
 #include "historywork/GetHistoryArchiveStateWork.h"
+#include "invariant/BucketListIsConsistentWithDatabase.h"
+#include "ledger/LedgerHeaderUtils.h"
 #include "ledger/LedgerManager.h"
 #include "main/ErrorMessages.h"
 #include "main/ExternalQueue.h"
@@ -20,9 +23,11 @@
 #include "main/PersistentState.h"
 #include "main/StellarCoreVersion.h"
 #include "overlay/OverlayManager.h"
+#include "util/GlobalChecks.h"
 #include "util/Logging.h"
 #include "work/WorkScheduler.h"
 
+#include <filesystem>
 #include <lib/http/HttpClient.h>
 #include <locale>
 #include <optional>
@@ -30,75 +35,152 @@
 namespace stellar
 {
 
-int
-runWithConfig(Config cfg, std::optional<CatchupConfiguration> cc)
+bool
+canRebuildInMemoryLedgerFromBuckets(uint32_t startAtLedger, uint32_t lcl)
 {
-    VirtualClock::Mode clockMode = VirtualClock::REAL_TIME;
+    // Number of streaming ledgers ahead of LCL. Core will
+    // rebuild the existing state if the difference between the start
+    // ledger and LCL is within this window.
+    uint32_t const RESTORE_STATE_LEDGER_WINDOW = 10;
+    // Do not rebuild genesis state
+    bool isGenesis = lcl == LedgerManager::GENESIS_LEDGER_SEQ;
+    return !isGenesis && startAtLedger >= lcl &&
+           startAtLedger - lcl <= RESTORE_STATE_LEDGER_WINDOW;
+}
 
-    if (cfg.MANUAL_CLOSE)
+void
+setupMinimalDBForInMemoryMode(Config const& cfg, uint32_t startAtLedger)
+{
+    releaseAssertOrThrow(cfg.isInMemoryMode());
+
+    VirtualClock clock;
+    Application::pointer app;
+
+    // Look for an existing minimal database, and see if it's possible to
+    // restore ledger state from buckets. If it is not possible, reset the
+    // existing database back to genesis. If the minimal database does not
+    // exist, create a new one.
+    bool found = false;
+
+    auto cfgToCheckDB = cfg;
+    cfgToCheckDB.METADATA_OUTPUT_STREAM = "";
+    try
     {
-        if (!cfg.NODE_IS_VALIDATOR)
+        app = Application::create(clock, cfgToCheckDB, /* newDB */ false);
+        found = true;
+    }
+    catch (std::runtime_error const&)
+    {
+        LOG_INFO(DEFAULT_LOG, "Minimal database not found, creating one...");
+        app = Application::create(clock, cfgToCheckDB, /* newDB */ true);
+    }
+
+    // Rebuild the state from scratch if:
+    //  - --start-at-ledger was not provided
+    //  - target catchup ledger is before LCL
+    //  - target catchup ledger is too far ahead of LCL
+    // In all other cases, attempt restoring the ledger states via
+    // local bucket application
+    if (found)
+    {
+        LOG_INFO(DEFAULT_LOG, "Found the existing minimal database");
+        app->getLedgerManager().loadLastKnownLedger(nullptr);
+        auto lcl = app->getLedgerManager().getLastClosedLedgerNum();
+        LOG_INFO(DEFAULT_LOG, "Current in-memory state, got LCL: {}", lcl);
+
+        if (!canRebuildInMemoryLedgerFromBuckets(startAtLedger, lcl))
         {
-            LOG_ERROR(DEFAULT_LOG,
-                      "Starting stellar-core in MANUAL_CLOSE mode requires "
-                      "NODE_IS_VALIDATOR to be set");
-            return 1;
+            LOG_INFO(DEFAULT_LOG, "Cannot restore the in-memory state, "
+                                  "rebuilding the state from scratch");
+            app->resetDBForInMemoryMode();
         }
-        if (cfg.RUN_STANDALONE)
-        {
-            clockMode = VirtualClock::VIRTUAL_TIME;
-            if (cfg.AUTOMATIC_MAINTENANCE_COUNT != 0 ||
-                cfg.AUTOMATIC_MAINTENANCE_PERIOD.count() != 0)
-            {
-                LOG_WARNING(
-                    DEFAULT_LOG,
-                    "Using MANUAL_CLOSE and RUN_STANDALONE together "
-                    "induces virtual time, which requires automatic "
-                    "maintenance to be disabled.  "
-                    "AUTOMATIC_MAINTENANCE_COUNT and "
-                    "AUTOMATIC_MAINTENANCE_PERIOD are being overridden to "
-                    "0.");
-                cfg.AUTOMATIC_MAINTENANCE_COUNT = 0;
-                cfg.AUTOMATIC_MAINTENANCE_PERIOD = std::chrono::seconds{0};
-            }
-        }
+    }
+}
+
+Application::pointer
+setupApp(Config& cfg, VirtualClock& clock, uint32_t startAtLedger,
+         std::string const& startAtHash)
+{
+    if (cfg.isInMemoryMode())
+    {
+        setupMinimalDBForInMemoryMode(cfg, startAtLedger);
     }
 
     LOG_INFO(DEFAULT_LOG, "Starting stellar-core {}", STELLAR_CORE_VERSION);
-    VirtualClock clock(clockMode);
     Application::pointer app;
-    try
+    app = Application::create(clock, cfg, false);
+    if (!app->getHistoryArchiveManager().checkSensibleConfig())
     {
-        cfg.COMMANDS.push_back("self-check");
-        app = Application::create(clock, cfg, false);
+        return nullptr;
+    }
 
-        if (!app->getHistoryArchiveManager().checkSensibleConfig())
-        {
-            return 1;
-        }
-        if (cfg.ARTIFICIALLY_ACCELERATE_TIME_FOR_TESTING)
-        {
-            LOG_WARNING(
-                DEFAULT_LOG,
-                "Artificial acceleration of time enabled (for testing only)");
-        }
+    app->getLedgerManager().loadLastKnownLedger(nullptr);
+    auto lcl = app->getLedgerManager().getLastClosedLedgerHeader();
 
-        if (cc)
+    if (cfg.isInMemoryMode() &&
+        lcl.header.ledgerSeq == LedgerManager::GENESIS_LEDGER_SEQ)
+    {
+        // If ledger is genesis, rebuild genesis state from buckets
+        if (!applyBucketsForLCL(*app))
         {
-            Json::Value catchupInfo;
-            // Allow catchup from any readable archive
-            int res = catchup(app, *cc, catchupInfo, /* archive */ nullptr);
-            if (res != 0)
+            return nullptr;
+        }
+    }
+
+    bool doCatchupForInMemoryMode =
+        cfg.isInMemoryMode() && startAtLedger != 0 && !startAtHash.empty();
+    if (doCatchupForInMemoryMode)
+    {
+        // At this point, setupApp has either confirmed that we can rebuild from
+        // the existing buckets, or reset the DB to genesis
+        if (lcl.header.ledgerSeq != LedgerManager::GENESIS_LEDGER_SEQ)
+        {
+            auto lclHashStr = binToHex(lcl.hash);
+            if (lcl.header.ledgerSeq == startAtLedger &&
+                lclHashStr != startAtHash)
             {
-                return res;
+                LOG_ERROR(DEFAULT_LOG,
+                          "Provided hash {} does not agree with stored hash {}",
+                          startAtHash, lclHashStr);
+                return nullptr;
+            }
+            if (!applyBucketsForLCL(*app))
+            {
+                return nullptr;
             }
         }
         else
         {
-            app->start();
+            LedgerNumHashPair pair;
+            pair.first = startAtLedger;
+            pair.second = std::optional<Hash>(hexToBin256(startAtHash));
+            auto mode = CatchupConfiguration::Mode::OFFLINE_COMPLETE;
+            Json::Value catchupInfo;
+            int res =
+                catchup(app, CatchupConfiguration{pair, 0, mode}, catchupInfo,
+                        /* archive */ nullptr);
+            if (res != 0)
+            {
+                return nullptr;
+            }
         }
+    }
 
-        if (!cfg.MODE_AUTO_STARTS_OVERLAY)
+    return app;
+}
+
+int
+runApp(Application::pointer app)
+{
+    // Certain in-memory modes in core may start the app before reaching this
+    // point, but since start is idempotent, second call will just no-op
+    app->start();
+
+    // Perform additional startup procedures (must be done after the app is
+    // setup) and run the app
+    try
+    {
+        if (!app->getConfig().MODE_AUTO_STARTS_OVERLAY)
         {
             app->getHerder().restoreState();
             app->getOverlayManager().start();
@@ -115,11 +197,11 @@ runWithConfig(Config cfg, std::optional<CatchupConfiguration> cc)
 
     try
     {
-        auto& io = clock.getIOContext();
+        auto& io = app->getClock().getIOContext();
         asio::io_context::work mainWork(io);
         while (!io.stopped())
         {
-            clock.crank();
+            app->getClock().crank();
         }
     }
     catch (std::exception const& e)
@@ -128,6 +210,38 @@ runWithConfig(Config cfg, std::optional<CatchupConfiguration> cc)
         throw; // propagate exception (core dump, etc)
     }
     return 0;
+}
+
+bool
+applyBucketsForLCL(Application& app,
+                   std::function<bool(LedgerEntryType)> onlyApply)
+{
+    auto has = app.getLedgerManager().getLastClosedLedgerHAS();
+    auto lclHash =
+        app.getPersistentState().getState(PersistentState::kLastClosedLedger);
+
+    auto maxProtocolVersion = Config::CURRENT_LEDGER_PROTOCOL_VERSION;
+    auto currentLedger =
+        LedgerHeaderUtils::loadByHash(app.getDatabase(), hexToBin256(lclHash));
+    if (currentLedger)
+    {
+        maxProtocolVersion = currentLedger->ledgerVersion;
+    }
+
+    std::map<std::string, std::shared_ptr<Bucket>> buckets;
+    auto work = app.getWorkScheduler().scheduleWork<ApplyBucketsWork>(
+        buckets, has, maxProtocolVersion, onlyApply);
+
+    while (app.getClock().crank(true) && !work->isDone())
+        ;
+
+    return work->getState() == BasicWork::State::WORK_SUCCESS;
+}
+
+bool
+applyBucketsForLCL(Application& app)
+{
+    return applyBucketsForLCL(app, [](LedgerEntryType) { return true; });
 }
 
 void
@@ -183,16 +297,105 @@ selfCheck(Config cfg)
     VirtualClock clock;
     cfg.setNoListen();
     Application::pointer app = Application::create(clock, cfg, false);
-    std::shared_ptr<HistoryArchiveReportWork> w =
-        app->getHistoryArchiveManager().scheduleHistoryArchiveReportWork();
-    while (clock.crank(true) && !w->isDone())
+
+    // We run self-checks from a "loaded but dormant" state where the
+    // application is not started, but the LM has loaded the LCL.
+    app->getLedgerManager().loadLastKnownLedger(nullptr);
+
+    // First we schedule the cheap, asynchronous "online" checks that get run by
+    // the HTTP "self-check" endpoint, and crank until they're done.
+    LOG_INFO(DEFAULT_LOG, "Self-check phase 1: fast online checks");
+    auto seq1 = app->scheduleSelfCheck(false);
+    while (clock.crank(true) && !seq1->isDone())
         ;
-    if (w->getState() == BasicWork::State::WORK_SUCCESS)
+
+    // Then we scan all the buckets to check they have expected hashes.
+    LOG_INFO(DEFAULT_LOG, "Self-check phase 2: bucket hash verification");
+    auto seq2 = app->getBucketManager().scheduleVerifyReferencedBucketsWork();
+    while (clock.crank(true) && !seq2->isDone())
+        ;
+
+    // Then we load the entire BL ledger state into memory and check it against
+    // the database. This part is synchronous and should _not_ be run "online",
+    // it's too expensive; it also can't easily be turned _into_ something you
+    // can run online, because it would need to snapshot the database for the
+    // duration of the run and, for example, sqlite doesn't support lockless
+    // snapshotting / MVCC.
+    //
+    // What we do instead is register a background thread listening for
+    // control-C so at least the user can interrupt this if they get impatient.
+    asio::signal_set stopSignals(app->getWorkerIOContext(), SIGINT);
+#ifdef SIGQUIT
+    stopSignals.add(SIGQUIT);
+#endif
+#ifdef SIGTERM
+    stopSignals.add(SIGTERM);
+#endif
+    stopSignals.async_wait([](asio::error_code const& ec, int sig) {
+        if (!ec)
+        {
+            LOG_INFO(DEFAULT_LOG, "got signal {}, exiting self-check", sig);
+            exit(1);
+        }
+    });
+
+    LOG_INFO(DEFAULT_LOG, "Self-check phase 3: ledger consistency checks");
+    BucketListIsConsistentWithDatabase blc(*app);
+    bool blcOk = true;
+    try
     {
+        blc.checkEntireBucketlist();
+    }
+    catch (std::runtime_error& e)
+    {
+        LOG_ERROR(DEFAULT_LOG, "Error during bucket-list consistency check: {}",
+                  e.what());
+        blcOk = false;
+    }
+
+    LOG_INFO(DEFAULT_LOG, "Self-check phase 4: crypto benchmarking");
+    size_t signPerSec = 0, verifyPerSec = 0;
+    SecretKey::benchmarkOpsPerSecond(signPerSec, verifyPerSec, 10000);
+    LOG_INFO(DEFAULT_LOG, "Benchmarked {} signatures / sec", signPerSec);
+    LOG_INFO(DEFAULT_LOG, "Benchmarked {} verifications / sec", verifyPerSec);
+
+    if (seq1->getState() == BasicWork::State::WORK_SUCCESS &&
+        seq2->getState() == BasicWork::State::WORK_SUCCESS && blcOk)
+    {
+        LOG_INFO(DEFAULT_LOG, "Self-check succeeded");
         return 0;
     }
     else
     {
+        LOG_ERROR(DEFAULT_LOG, "Self-check failed");
+        return 1;
+    }
+}
+
+int
+mergeBucketList(Config cfg, std::string const& outputDir)
+{
+    VirtualClock clock;
+    cfg.setNoListen();
+    Application::pointer app = Application::create(clock, cfg, false);
+    app->getLedgerManager().loadLastKnownLedger(nullptr);
+    auto& lm = app->getLedgerManager();
+    auto& bm = app->getBucketManager();
+    HistoryArchiveState has = lm.getLastClosedLedgerHAS();
+    auto bucket = bm.mergeBuckets(has);
+
+    using std::filesystem::path;
+    path bpath(bucket->getFilename());
+    path outpath(outputDir);
+    outpath /= bpath.filename();
+    if (fs::durableRename(bpath.string(), outpath.string(), outputDir))
+    {
+        LOG_INFO(DEFAULT_LOG, "Wrote merged bucket {}", outpath);
+        return 0;
+    }
+    else
+    {
+        LOG_ERROR(DEFAULT_LOG, "Writing bucket failed");
         return 1;
     }
 }
@@ -249,58 +452,12 @@ rebuildLedgerFromBuckets(Config cfg)
 {
     VirtualClock clock(VirtualClock::REAL_TIME);
     cfg.setNoListen();
-    Application::pointer app = Application::create(clock, cfg, false);
-
-    auto& ps = app->getPersistentState();
-    auto lcl = ps.getState(PersistentState::kLastClosedLedger);
-    auto hasStr = ps.getState(PersistentState::kHistoryArchiveState);
-    auto pass = ps.getState(PersistentState::kNetworkPassphrase);
-
-    LOG_INFO(DEFAULT_LOG, "Re-initializing database ledger tables.");
-    auto& db = app->getDatabase();
-    auto& session = app->getDatabase().getSession();
-    soci::transaction tx(session);
-
-    db.initialize();
-    db.upgradeToCurrentSchema();
-    db.clearPreparedStatementCache();
-    LOG_INFO(DEFAULT_LOG, "Re-initialized database ledger tables.");
-
-    LOG_INFO(DEFAULT_LOG, "Re-storing persistent state.");
-    ps.setState(PersistentState::kLastClosedLedger, lcl);
-    ps.setState(PersistentState::kHistoryArchiveState, hasStr);
-    ps.setState(PersistentState::kNetworkPassphrase, pass);
-
-    LOG_INFO(DEFAULT_LOG, "Applying buckets from LCL bucket list.");
-    std::map<std::string, std::shared_ptr<Bucket>> localBuckets;
-    auto& ws = app->getWorkScheduler();
-
-    HistoryArchiveState has;
-    has.fromString(hasStr);
-    has.prepareForPublish(*app);
-
-    auto applyBucketsWork = ws.executeWork<ApplyBucketsWork>(
-        localBuckets, has, Config::CURRENT_LEDGER_PROTOCOL_VERSION);
-    auto ok = applyBucketsWork->getState() == BasicWork::State::WORK_SUCCESS;
-    if (ok)
-    {
-        tx.commit();
-        LOG_INFO(DEFAULT_LOG, "*");
-        LOG_INFO(DEFAULT_LOG, "* Rebuilt ledger from buckets successfully.");
-        LOG_INFO(DEFAULT_LOG, "*");
-    }
-    else
-    {
-        tx.rollback();
-        LOG_INFO(DEFAULT_LOG, "*");
-        LOG_INFO(DEFAULT_LOG, "* Rebuild of ledger failed.");
-        LOG_INFO(DEFAULT_LOG, "*");
-    }
+    Application::pointer app = Application::create(clock, cfg, false, true);
 
     app->gracefulStop();
     while (clock.crank(true))
         ;
-    return ok ? 0 : 1;
+    return 1;
 }
 #endif
 
@@ -484,7 +641,7 @@ publish(Application::pointer app)
 
     auto lcl = app->getLedgerManager().getLastClosedLedgerNum();
     auto isCheckpoint = app->getHistoryManager().isLastLedgerInCheckpoint(lcl);
-    auto expectedPublishQueueSize = isCheckpoint ? 1 : 0;
+    size_t expectedPublishQueueSize = isCheckpoint ? 1 : 0;
 
     app->getHistoryManager().publishQueuedHistory();
     while (app->getHistoryManager().publishQueueLength() !=
@@ -501,5 +658,11 @@ publish(Application::pointer app)
     LOG_INFO(DEFAULT_LOG, "*");
 
     return 0;
+}
+
+std::string
+minimalDBForInMemoryMode(Config const& cfg)
+{
+    return fmt::format("sqlite3://{}/minimal.db", cfg.BUCKET_DIR_PATH);
 }
 }

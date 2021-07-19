@@ -2,6 +2,8 @@
 // under the Apache License, Version 2.0. See the COPYING file at the root
 // of this distribution or at http://www.apache.org/licenses/LICENSE-2.0
 
+#include "work/ConditionalWork.h"
+#include "work/WorkWithCallback.h"
 #include <limits>
 #define STELLAR_CORE_REAL_TIMER_FOR_CERTAIN_NOT_JUST_VIRTUAL_TIME
 #include "ApplicationImpl.h"
@@ -12,12 +14,14 @@
 #include "util/asio.h"
 #include "bucket/Bucket.h"
 #include "bucket/BucketManager.h"
+#include "catchup/ApplyBucketsWork.h"
 #include "crypto/SHA.h"
 #include "crypto/SecretKey.h"
 #include "database/Database.h"
 #include "herder/Herder.h"
 #include "herder/HerderPersistence.h"
 #include "history/HistoryArchiveManager.h"
+#include "history/HistoryArchiveReportWork.h"
 #include "history/HistoryManager.h"
 #include "invariant/AccountSubEntriesCountIsValid.h"
 #include "invariant/BucketListIsConsistentWithDatabase.h"
@@ -26,9 +30,11 @@
 #include "invariant/LedgerEntryIsValid.h"
 #include "invariant/LiabilitiesMatchOffers.h"
 #include "invariant/SponsorshipCountIsValid.h"
+#include "ledger/InMemoryLedgerTxn.h"
 #include "ledger/InMemoryLedgerTxnRoot.h"
 #include "ledger/LedgerManager.h"
 #include "ledger/LedgerTxn.h"
+#include "main/ApplicationUtils.h"
 #include "main/CommandHandler.h"
 #include "main/ExternalQueue.h"
 #include "main/Maintainer.h"
@@ -40,6 +46,7 @@
 #include "medida/timer.h"
 #include "overlay/BanManager.h"
 #include "overlay/OverlayManager.h"
+#include "overlay/OverlayManagerImpl.h"
 #include "process/ProcessManager.h"
 #include "scp/LocalNode.h"
 #include "scp/QuorumSetUtils.h"
@@ -49,6 +56,7 @@
 #include "util/StatusManager.h"
 #include "util/Thread.h"
 #include "util/TmpDir.h"
+#include "work/BasicWork.h"
 #include "work/WorkScheduler.h"
 
 #ifdef BUILD_TESTS
@@ -76,6 +84,7 @@ ApplicationImpl::ApplicationImpl(VirtualClock& clock, Config const& cfg)
     , mStarted(false)
     , mStopping(false)
     , mStoppingTimer(*this)
+    , mSelfCheckTimer(*this)
     , mMetrics(std::make_unique<medida::MetricsRegistry>())
     , mAppStateCurrent(mMetrics->NewCounter({"app", "state", "current"}))
     , mPostOnMainThreadDelay(
@@ -132,39 +141,121 @@ ApplicationImpl::ApplicationImpl(VirtualClock& clock, Config const& cfg)
     }
 }
 
-void
-ApplicationImpl::initialize(bool createNewDB)
+static void
+maybeRebuildLedger(Application& app, bool applyBuckets)
 {
+    std::set<LedgerEntryType> toRebuild;
+    auto& ps = app.getPersistentState();
+    for (auto let : xdr::xdr_traits<LedgerEntryType>::enum_values())
+    {
+        LedgerEntryType t = static_cast<LedgerEntryType>(let);
+        if (ps.shouldRebuildForType(t))
+        {
+            toRebuild.emplace(t);
+        }
+    }
+    if (toRebuild.empty())
+    {
+        return;
+    }
+
+    if (!app.getConfig().MODE_USES_IN_MEMORY_LEDGER)
+    {
+        app.getDatabase().clearPreparedStatementCache();
+        soci::transaction tx(app.getDatabase().getSession());
+
+        for (auto let : toRebuild)
+        {
+            switch (let)
+            {
+            case ACCOUNT:
+                LOG_INFO(DEFAULT_LOG, "Dropping accounts");
+                app.getLedgerTxnRoot().dropAccounts();
+                break;
+            case TRUSTLINE:
+                LOG_INFO(DEFAULT_LOG, "Dropping trustlines");
+                app.getLedgerTxnRoot().dropTrustLines();
+                break;
+            case OFFER:
+                LOG_INFO(DEFAULT_LOG, "Dropping offers");
+                app.getLedgerTxnRoot().dropOffers();
+                break;
+            case DATA:
+                LOG_INFO(DEFAULT_LOG, "Dropping accountdata");
+                app.getLedgerTxnRoot().dropData();
+                break;
+            case CLAIMABLE_BALANCE:
+                LOG_INFO(DEFAULT_LOG, "Dropping claimablebalances");
+                app.getLedgerTxnRoot().dropClaimableBalances();
+                break;
+            case LIQUIDITY_POOL:
+                LOG_INFO(DEFAULT_LOG, "Dropping liquiditypools");
+                app.getLedgerTxnRoot().dropLiquidityPools();
+                break;
+            default:
+                abort();
+            }
+        }
+
+        tx.commit();
+    }
+
+    // No transaction is needed. ApplyBucketsWork breaks the apply into many
+    // small chunks, each of which has its own transaction. If it fails at some
+    // point in the middle, then rebuildledger will not be cleared so this will
+    // run again on next start up.
+    if (applyBuckets)
+    {
+        LOG_INFO(DEFAULT_LOG, "Rebuilding ledger tables by applying buckets");
+        auto filter = [&toRebuild](LedgerEntryType t) {
+            return toRebuild.find(t) != toRebuild.end();
+        };
+        if (!applyBucketsForLCL(app, filter))
+        {
+            throw std::runtime_error("Could not rebuild ledger tables");
+        }
+        LOG_INFO(DEFAULT_LOG, "Successfully rebuilt ledger tables");
+    }
+
+    for (auto let : toRebuild)
+    {
+        ps.clearRebuildForType(let);
+    }
+}
+
+void
+ApplicationImpl::initialize(bool createNewDB, bool forceRebuild)
+{
+    // Subtle: initialize the bucket manager first before initializing the
+    // database. This is needed as some modes in core (such as in-memory) use a
+    // small database inside the bucket directory.
+    mBucketManager = BucketManager::create(*this);
+
+    bool initNewDB =
+        createNewDB || mConfig.DATABASE.value == "sqlite3://:memory:";
+    if (initNewDB)
+    {
+        mBucketManager->dropAll();
+    }
+
     mDatabase = createDatabase();
     mPersistentState = std::make_unique<PersistentState>(*this);
     mOverlayManager = createOverlayManager();
     mLedgerManager = createLedgerManager();
     mHerder = createHerder();
     mHerderPersistence = HerderPersistence::create(*this);
-    mBucketManager = BucketManager::create(*this);
     mCatchupManager = CatchupManager::create(*this);
     mHistoryArchiveManager = std::make_unique<HistoryArchiveManager>(*this);
     mHistoryManager = HistoryManager::create(*this);
     mInvariantManager = createInvariantManager();
     mMaintainer = std::make_unique<Maintainer>(*this);
-    mCommandHandler = std::make_unique<CommandHandler>(*this);
     mWorkScheduler = WorkScheduler::create(*this);
     mBanManager = BanManager::create(*this);
     mStatusManager = std::make_unique<StatusManager>();
 
-#ifdef BEST_OFFER_DEBUGGING
-    auto const bestOfferDebuggingEnabled = mConfig.BEST_OFFER_DEBUGGING_ENABLED;
-#endif
-
     if (getConfig().MODE_USES_IN_MEMORY_LEDGER)
     {
-        mLedgerTxnRoot = std::make_unique<InMemoryLedgerTxnRoot>(
-#ifdef BEST_OFFER_DEBUGGING
-            bestOfferDebuggingEnabled
-#endif
-        );
-        mNeverCommittingLedgerTxn =
-            std::make_unique<LedgerTxn>(*mLedgerTxnRoot);
+        resetLedgerState();
     }
     else
     {
@@ -179,7 +270,7 @@ ApplicationImpl::initialize(bool createNewDB)
             *mDatabase, mConfig.ENTRY_CACHE_SIZE, mConfig.PREFETCH_BATCH_SIZE
 #ifdef BEST_OFFER_DEBUGGING
             ,
-            bestOfferDebuggingEnabled
+            mConfig.BEST_OFFER_DEBUGGING_ENABLED
 #endif
         );
     }
@@ -192,35 +283,70 @@ ApplicationImpl::initialize(bool createNewDB)
     SponsorshipCountIsValid::registerInvariant(*this);
     enableInvariantsFromConfig();
 
-    if (createNewDB || mConfig.DATABASE.value == "sqlite3://:memory:")
+    if (initNewDB)
     {
         newDB();
     }
     else
     {
-        upgradeDB();
+        upgradeToCurrentSchemaAndMaybeRebuildLedger(true, forceRebuild);
     }
 
     // Subtle: process manager should come to existence _after_ BucketManager
     // initialization and newDB run, as it relies on tmp dir created in the
     // constructor
     mProcessManager = ProcessManager::create(*this);
+
+    // After everything is initialized, start accepting HTTP commands
+    mCommandHandler = std::make_unique<CommandHandler>(*this);
+
     LOG_DEBUG(DEFAULT_LOG, "Application constructed");
+}
+
+void
+ApplicationImpl::resetLedgerState()
+{
+    if (getConfig().MODE_USES_IN_MEMORY_LEDGER)
+    {
+        mNeverCommittingLedgerTxn.reset();
+        mInMemoryLedgerTxnRoot = std::make_unique<InMemoryLedgerTxnRoot>(
+#ifdef BEST_OFFER_DEBUGGING
+            mConfig.BEST_OFFER_DEBUGGING_ENABLED
+#endif
+        );
+        mNeverCommittingLedgerTxn = std::make_unique<InMemoryLedgerTxn>(
+            *mInMemoryLedgerTxnRoot, getDatabase());
+    }
+    else
+    {
+        auto& lsRoot = getLedgerTxnRoot();
+        lsRoot.deleteObjectsModifiedOnOrAfterLedger(0);
+    }
 }
 
 void
 ApplicationImpl::newDB()
 {
     mDatabase->initialize();
-    mDatabase->upgradeToCurrentSchema();
-    mBucketManager->dropAll();
+    upgradeToCurrentSchemaAndMaybeRebuildLedger(false, true);
     mLedgerManager->startNewLedger();
 }
 
 void
-ApplicationImpl::upgradeDB()
+ApplicationImpl::upgradeToCurrentSchemaAndMaybeRebuildLedger(bool applyBuckets,
+                                                             bool forceRebuild)
 {
+    if (forceRebuild)
+    {
+        auto& ps = getPersistentState();
+        for (auto let : xdr::xdr_traits<LedgerEntryType>::enum_values())
+        {
+            ps.setRebuildForType(static_cast<LedgerEntryType>(let));
+        }
+    }
+
     mDatabase->upgradeToCurrentSchema();
+    maybeRebuildLedger(*this, applyBuckets);
 }
 
 void
@@ -349,9 +475,6 @@ ApplicationImpl::getJsonInfo()
         info["invariant_failures"] = invariantFailures;
     }
 
-    info["history_failure_rate"] =
-        fmt::format("{:.2}", getHistoryArchiveManager().getFailureRate());
-
     return root;
 }
 
@@ -360,6 +483,66 @@ ApplicationImpl::reportInfo()
 {
     mLedgerManager->loadLastKnownLedger(nullptr);
     LOG_INFO(DEFAULT_LOG, "info -> {}", getJsonInfo().toStyledString());
+}
+
+std::shared_ptr<BasicWork>
+ApplicationImpl::scheduleSelfCheck(bool waitUntilNextCheckpoint)
+{
+    // Ensure the timer is re-triggered no matter what.
+    if (mConfig.AUTOMATIC_SELF_CHECK_PERIOD.count() != 0)
+    {
+        mSelfCheckTimer.expires_from_now(mConfig.AUTOMATIC_SELF_CHECK_PERIOD);
+        mSelfCheckTimer.async_wait(
+            [this, waitUntilNextCheckpoint]() {
+                scheduleSelfCheck(waitUntilNextCheckpoint);
+            },
+            VirtualTimer::onFailureNoop);
+    }
+
+    // We store any self-check that gets scheduled so that a second call to
+    // schedule a self-check while one is running returns the running one.
+    if (auto existing = mRunningSelfCheck.lock())
+    {
+        return existing;
+    }
+    auto& ws = getWorkScheduler();
+    auto& lm = getLedgerManager();
+    auto& ham = getHistoryArchiveManager();
+
+    LedgerHeaderHistoryEntry lhhe = lm.getLastClosedLedgerHeader();
+
+    std::vector<std::shared_ptr<BasicWork>> seq;
+    seq.emplace_back(ham.getHistoryArchiveReportWork());
+
+    auto checkLedger = ham.getCheckLedgerHeaderWork(lhhe);
+    if (waitUntilNextCheckpoint)
+    {
+        // Delay until a second full checkpoint-period after the next checkpoint
+        // publication. The captured lhhe should usually be published by then.
+        auto& hm = getHistoryManager();
+        auto targetLedger =
+            hm.firstLedgerAfterCheckpointContaining(lhhe.header.ledgerSeq);
+        targetLedger = hm.firstLedgerAfterCheckpointContaining(targetLedger);
+        auto cond = [targetLedger](Application& app) -> bool {
+            auto& lm = app.getLedgerManager();
+            return lm.getLastClosedLedgerNum() > targetLedger;
+        };
+        seq.emplace_back(std::make_shared<ConditionalWork>(
+            *this, "wait-for-lcl", cond, checkLedger,
+            std::chrono::seconds(10)));
+    }
+    else
+    {
+        seq.emplace_back(checkLedger);
+    }
+
+    // Stash a weak ptr to the shared ptr we're returning, for subsequent calls.
+    std::shared_ptr<BasicWork> ptr =
+        ws.scheduleWork<WorkSequence>("self-check", seq, BasicWork::RETRY_NEVER,
+                                      /*stopOnFirstFailure=*/false);
+    mRunningSelfCheck = ptr;
+
+    return ptr;
 }
 
 Hash const&
@@ -394,10 +577,79 @@ ApplicationImpl::~ApplicationImpl()
     LOG_INFO(DEFAULT_LOG, "Application destroyed");
 }
 
+void
+ApplicationImpl::resetDBForInMemoryMode()
+{
+    // Load the peer information and reinitialize the DB
+    auto& pm = getOverlayManager().getPeerManager();
+    auto peerData = pm.loadAllPeers();
+    newDB();
+    pm.storePeers(peerData);
+
+    LOG_INFO(DEFAULT_LOG, "In-memory state is reset back to genesis");
+}
+
 uint64_t
 ApplicationImpl::timeNow()
 {
     return VirtualClock::to_time_t(getClock().system_now());
+}
+
+void
+ApplicationImpl::validateAndLogConfig()
+{
+    if (mConfig.FORCE_SCP && !mConfig.NODE_IS_VALIDATOR)
+    {
+        throw std::invalid_argument(
+            "FORCE_SCP is set but NODE_IS_VALIDATOR not set");
+    }
+
+    auto const isNetworkedValidator =
+        mConfig.NODE_IS_VALIDATOR && !mConfig.RUN_STANDALONE;
+
+    if (mConfig.METADATA_OUTPUT_STREAM != "" && isNetworkedValidator)
+    {
+        throw std::invalid_argument(
+            "METADATA_OUTPUT_STREAM is set, NODE_IS_VALIDATOR is set, and "
+            "RUN_STANDALONE is not set");
+    }
+
+    // EXPERIMENTAL_PRECAUTION_DELAY_META is only meaningful when there's a
+    // METADATA_OUTPUT_STREAM.  We only allow EXPERIMENTAL_PRECAUTION_DELAY_META
+    // on a captive core, without a persistent database; old-style ingestion
+    // which reads from the core database could do the delaying itself.
+    if (mConfig.METADATA_OUTPUT_STREAM != "" &&
+        mConfig.EXPERIMENTAL_PRECAUTION_DELAY_META && !mConfig.isInMemoryMode())
+    {
+        throw std::invalid_argument(
+            "Using a METADATA_OUTPUT_STREAM with "
+            "EXPERIMENTAL_PRECAUTION_DELAY_META set to true "
+            "requires --in-memory");
+    }
+
+    if (isNetworkedValidator && mConfig.isInMemoryMode())
+    {
+        throw std::invalid_argument(
+            "In-memory mode is set, NODE_IS_VALIDATOR is set, "
+            "and RUN_STANDALONE is not set");
+    }
+
+    if (getHistoryArchiveManager().hasAnyWritableHistoryArchive())
+    {
+        if (!mConfig.modeStoresAllHistory())
+        {
+            throw std::invalid_argument(
+                "Core is not configured to store history, but "
+                "some history archives are writable");
+        }
+    }
+
+    if (mConfig.QUORUM_SET.threshold == 0)
+    {
+        throw std::invalid_argument("Quorum not configured");
+    }
+
+    mConfig.logBasicInfo();
 }
 
 void
@@ -415,51 +667,6 @@ ApplicationImpl::start()
     {
         mHerder->setUpgrades(mConfig);
     }
-
-    if (mConfig.FORCE_SCP && !mConfig.NODE_IS_VALIDATOR)
-    {
-        throw std::invalid_argument(
-            "FORCE_SCP is set but NODE_IS_VALIDATOR not set");
-    }
-
-    auto const isNetworkedValidator =
-        mConfig.NODE_IS_VALIDATOR && !mConfig.RUN_STANDALONE;
-
-    if (mConfig.METADATA_OUTPUT_STREAM != "" && isNetworkedValidator)
-    {
-        throw std::invalid_argument(
-            "METADATA_OUTPUT_STREAM is set, NODE_IS_VALIDATOR is set, and "
-            "RUN_STANDALONE is not set");
-    }
-
-    if (isNetworkedValidator)
-    {
-        bool inMemory = mConfig.DATABASE.value == "sqlite3://:memory:" &&
-                        !mConfig.MODE_STORES_HISTORY &&
-                        !mConfig.MODE_KEEPS_BUCKETS;
-        if (inMemory)
-        {
-            throw std::invalid_argument(
-                "In-memory mode is set, NODE_IS_VALIDATOR is set, "
-                "and RUN_STANDALONE is not set");
-        }
-    }
-
-    if (getHistoryArchiveManager().hasAnyWritableHistoryArchive())
-    {
-        if (!mConfig.MODE_STORES_HISTORY)
-        {
-            throw std::invalid_argument("MODE_STORES_HISTORY is not set, but "
-                                        "some history archives are writable");
-        }
-    }
-
-    if (mConfig.QUORUM_SET.threshold == 0)
-    {
-        throw std::invalid_argument("Quorum not configured");
-    }
-
-    mConfig.logBasicInfo();
 
     bool done = false;
     mLedgerManager->loadLastKnownLedger([this,
@@ -494,6 +701,10 @@ ApplicationImpl::start()
 
             mHerder->bootstrap();
         }
+        if (mConfig.AUTOMATIC_SELF_CHECK_PERIOD.count() != 0)
+        {
+            scheduleSelfCheck(true);
+        }
         done = true;
     });
 
@@ -520,6 +731,10 @@ ApplicationImpl::gracefulStop()
     }
     if (mBucketManager)
     {
+        // This call happens in shutdown -- before destruction -- so that we can
+        // be sure other subsystems (ledger etc.) are still alive and we can
+        // call into them to figure out which buckets _are_ referenced.
+        mBucketManager->forgetUnreferencedBuckets();
         mBucketManager->shutdown();
     }
     if (mHerder)
@@ -657,29 +872,31 @@ ApplicationImpl::targetManualCloseLedgerSeqNum(
     std::optional<uint32_t> const& explicitlyProvidedSeqNum)
 {
     auto const startLedgerSeq = getLedgerManager().getLastClosedLedgerNum();
+    // -1: after externalizing we want to make sure that we don't reason about
+    // ledgers that overflow int32
+    auto const maxLedgerSeq =
+        static_cast<uint32>(std::numeric_limits<int32_t>::max() - 1);
 
     // The "scphistory" stores ledger sequence numbers as INTs.
-    if (startLedgerSeq >=
-        static_cast<uint32>(std::numeric_limits<int32_t>::max()))
+    if (startLedgerSeq >= maxLedgerSeq)
     {
-        throw std::invalid_argument(fmt::format(
-            FMT_STRING(
-                "Manually closed ledger sequence number ({}) already at max"),
-            startLedgerSeq));
+        throw std::invalid_argument(
+            fmt::format(FMT_STRING("Manually closed ledger sequence number "
+                                   "({}) already at max ({})"),
+                        startLedgerSeq, maxLedgerSeq));
     }
 
     auto const nextLedgerSeq = startLedgerSeq + 1;
 
     if (explicitlyProvidedSeqNum)
     {
-        if (*explicitlyProvidedSeqNum >
-            static_cast<uint32>(std::numeric_limits<int32_t>::max()))
+        if (*explicitlyProvidedSeqNum > maxLedgerSeq)
         {
             // The "scphistory" stores ledger sequence numbers as INTs.
             throw std::invalid_argument(fmt::format(
-                FMT_STRING("Manual close ledger sequence number {} beyond max"),
-                *explicitlyProvidedSeqNum,
-                std::numeric_limits<int32_t>::max()));
+                FMT_STRING(
+                    "Manual close ledger sequence number {} beyond max ({})"),
+                *explicitlyProvidedSeqNum, maxLedgerSeq));
         }
 
         if (*explicitlyProvidedSeqNum <= startLedgerSeq)
@@ -818,7 +1035,7 @@ ApplicationImpl::getState() const
 {
     State s;
 
-    if (!mStarted)
+    if (!mStarted || mHerder->getState() == Herder::HERDER_BOOTING_STATE)
     {
         s = APP_CREATED_STATE;
     }
@@ -826,7 +1043,7 @@ ApplicationImpl::getState() const
     {
         s = APP_STOPPING_STATE;
     }
-    else if (mHerder->getState() == Herder::HERDER_SYNCING_STATE)
+    else if (mHerder->getState() != Herder::HERDER_TRACKING_NETWORK_STATE)
     {
         s = APP_ACQUIRING_CONSENSUS_STATE;
     }
@@ -853,9 +1070,9 @@ ApplicationImpl::getState() const
 std::string
 ApplicationImpl::getStateHuman() const
 {
-    static const char* stateStrings[APP_NUM_STATE] = {
-        "Booting",     "Joining SCP", "Connected",
-        "Catching up", "Synced!",     "Stopping"};
+    static std::array<const char*, APP_NUM_STATE> stateStrings =
+        std::array{"Booting",     "Joining SCP", "Connected",
+                   "Catching up", "Synced!",     "Stopping"};
     return std::string(stateStrings[getState()]);
 }
 

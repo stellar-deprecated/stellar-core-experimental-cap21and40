@@ -27,7 +27,12 @@
 
 namespace stellar
 {
-const int64_t TransactionQueue::FEE_MULTIPLIER = 10;
+const uint64_t TransactionQueue::FEE_MULTIPLIER = 10;
+
+std::array<const char*,
+           static_cast<int>(TransactionQueue::AddResult::ADD_STATUS_COUNT)>
+    TX_STATUS_STRING = std::array{"PENDING", "DUPLICATE", "ERROR",
+                                  "TRY_AGAIN_LATER", "FILTERED"};
 
 TransactionQueue::TransactionQueue(Application& app, uint32 pendingDepth,
                                    uint32 banDepth, uint32 poolLedgerMultiplier)
@@ -233,7 +238,7 @@ TransactionQueue::canAdd(TransactionFrameBasePtr tx,
                          .header.scpValue.closeTime;
     LedgerTxn ltx(mApp.getLedgerTxnRoot());
     if (!tx->checkValid(ltx, seqNum, 0,
-                        getUpperBoundCloseTimeOffset(mApp, closeTime)))
+                        getUpperBoundCloseTimeOffset(mApp, closeTime), true))
     {
         return TransactionQueue::AddResult::ADD_STATUS_ERROR;
     }
@@ -616,7 +621,7 @@ TransactionQueue::shift()
         }
     }
 
-    for (auto i = 0; i < sizes.size(); i++)
+    for (size_t i = 0; i < sizes.size(); i++)
     {
         mSizeByAge[i]->set_count(sizes[i]);
     }
@@ -626,10 +631,10 @@ TransactionQueue::shift()
         rand_uniform<uint64>(0, std::numeric_limits<uint64>::max());
 }
 
-int
+size_t
 TransactionQueue::countBanned(int index) const
 {
-    return static_cast<int>(mBannedTransactions[index].size());
+    return mBannedTransactions[index].size();
 }
 
 bool
@@ -654,31 +659,13 @@ TransactionQueue::toTxSet(LedgerHeaderHistoryEntry const& lcl) const
     {
         for (auto const& tx : m.second.mTransactions)
         {
-            // The previous version of this enforced the following constraint:
-            // there may be any number of transactions for a given source
-            // account, but all transactions for that source account must
-            // satisfy one of the following mutually exclusive conditions
-            // (1) sequence number <= startingSeq - 1
-            // (2) sequence number >= startingSeq
-            //
-            // This version enforces the following constraint: it is forbidden
-            // to include a transaction with
-            //     sequence number == startingSeq
-            // The new condition is strictly stronger. First, note that the
-            // sequence numbers (assuming 0 < k < n, and the source account has
-            // initial number startingSeq - n - 1)
-            //     startingSeq - n, ..., startingSeq - n + k
-            // would be accepted by the new condition and by condition (1)
-            // above. Second, note that the sequence numbers (assuming 0 < k,
-            // 0 < n, and the source account has initial sequence number
-            // startingSeq + n - 1)
-            //     startingSeq + n, ..., startingSeq + n + k
-            // would be accepted by the new condition and by condition (2)
-            // above. These are the only sequence numbers that would be accepted
-            // by the new condition. But the old condition would also accept
-            // (assuming 0 < k, and the source account has initial sequence
-            // number startingSeq - 1)
-            //     startingSeq, ..., startingSeq + k .
+            // This guarantees that a node will never nominate a transaction set
+            // containing a transaction with seqNum == startingSeq. This is
+            // required to support the analogous transaction validity condition
+            // in TransactionFrame::isBadSeq. As a consequence, all transactions
+            // for a source account will either have
+            //     - sequence numbers above startingSeq, or
+            //     - sequence numbers below startingSeq.
             if (tx.mTx->getSeqNum() == startingSeq)
             {
                 break;
@@ -704,8 +691,6 @@ TransactionQueue::clearAll()
 void
 TransactionQueue::maybeVersionUpgraded()
 {
-    std::vector<ReplacedTransaction> res;
-
     auto const& lcl = mApp.getLedgerManager().getLastClosedLedgerHeader();
     if (mLedgerVersion < 13 && lcl.header.ledgerVersion >= 13)
     {
@@ -717,13 +702,16 @@ TransactionQueue::maybeVersionUpgraded()
 size_t
 TransactionQueue::getMaxOpsToFloodThisPeriod() const
 {
-    size_t opsToFloodLedger;
     auto& cfg = mApp.getConfig();
-    auto const opRatePerLedger = cfg.FLOOD_OP_RATE_PER_LEDGER;
-    size_t maxOps = mApp.getLedgerManager().getLastMaxTxSetSizeOps();
-    opsToFloodLedger = static_cast<size_t>(opRatePerLedger * maxOps);
+    double opRatePerLedger = cfg.FLOOD_OP_RATE_PER_LEDGER;
 
-    size_t opsToFlood;
+    size_t maxOps = mApp.getLedgerManager().getLastMaxTxSetSizeOps();
+    double opsToFloodLedgerDbl = opRatePerLedger * maxOps;
+    releaseAssertOrThrow(opsToFloodLedgerDbl >= 0.0);
+    releaseAssertOrThrow(isRepresentableAsInt64(opsToFloodLedgerDbl));
+    int64_t opsToFloodLedger = static_cast<int64_t>(opsToFloodLedgerDbl);
+
+    int64_t opsToFlood;
     if (mApp.getConfig().FLOOD_TX_PERIOD_MS != 0)
     {
         opsToFlood = mBroadcastOpCarryover +
@@ -736,7 +724,8 @@ TransactionQueue::getMaxOpsToFloodThisPeriod() const
         // else, flood the target at once
         opsToFlood = opsToFloodLedger;
     }
-    return opsToFlood;
+    releaseAssertOrThrow(opsToFlood >= 0);
+    return static_cast<size_t>(opsToFlood);
 }
 
 bool

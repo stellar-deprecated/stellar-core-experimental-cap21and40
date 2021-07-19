@@ -15,6 +15,7 @@
 #include "invariant/InvariantManager.h"
 #include "ledger/LedgerTxn.h"
 #include "main/Application.h"
+#include "transactions/TransactionUtils.h"
 #include <Tracy.hpp>
 #include <fmt/format.h>
 #include <medida/meter.h>
@@ -26,10 +27,12 @@ namespace stellar
 ApplyBucketsWork::ApplyBucketsWork(
     Application& app,
     std::map<std::string, std::shared_ptr<Bucket>> const& buckets,
-    HistoryArchiveState const& applyState, uint32_t maxProtocolVersion)
+    HistoryArchiveState const& applyState, uint32_t maxProtocolVersion,
+    std::function<bool(LedgerEntryType)> onlyApply)
     : BasicWork(app, "apply-buckets", BasicWork::RETRY_NEVER)
     , mBuckets(buckets)
     , mApplyState(applyState)
+    , mEntryTypeFilter(onlyApply)
     , mApplying(false)
     , mTotalSize(0)
     , mLevel(BucketList::kNumLevels - 1)
@@ -41,6 +44,15 @@ ApplyBucketsWork::ApplyBucketsWork(
     , mBucketApplyFailure(app.getMetrics().NewMeter(
           {"history", "bucket-apply", "failure"}, "event"))
     , mCounters(app.getClock().now())
+{
+}
+
+ApplyBucketsWork::ApplyBucketsWork(
+    Application& app,
+    std::map<std::string, std::shared_ptr<Bucket>> const& buckets,
+    HistoryArchiveState const& applyState, uint32_t maxProtocolVersion)
+    : ApplyBucketsWork(app, buckets, applyState, maxProtocolVersion,
+                       [](LedgerEntryType) { return true; })
 {
 }
 
@@ -77,6 +89,22 @@ ApplyBucketsWork::onReset()
 
     if (!isAborting())
     {
+        // When applying buckets with accounts, we have to make sure that the
+        // root account has been removed. This comes into play, for example,
+        // when applying buckets from genesis the root account already exists.
+        if (mEntryTypeFilter(ACCOUNT))
+        {
+            SecretKey skey = SecretKey::fromSeed(mApp.getNetworkID());
+
+            LedgerTxn ltx(mApp.getLedgerTxnRoot());
+            auto rootAcc = loadAccount(ltx, skey.getPublicKey());
+            if (rootAcc)
+            {
+                rootAcc.erase();
+            }
+            ltx.commit();
+        }
+
         auto addBucket = [this](std::shared_ptr<Bucket const> const& bucket) {
             if (bucket->getSize() > 0)
             {
@@ -114,23 +142,11 @@ ApplyBucketsWork::startLevel()
     bool applySnap = (i.snap != binToHex(level.getSnap()->getHash()));
     bool applyCurr = (i.curr != binToHex(level.getCurr()->getHash()));
 
-    if (!mApplying && !mApp.getConfig().MODE_USES_IN_MEMORY_LEDGER &&
-        (applySnap || applyCurr))
-    {
-        uint32_t oldestLedger = applySnap
-                                    ? BucketList::oldestLedgerInSnap(
-                                          mApplyState.currentLedger, mLevel)
-                                    : BucketList::oldestLedgerInCurr(
-                                          mApplyState.currentLedger, mLevel);
-        auto& lsRoot = mApp.getLedgerTxnRoot();
-        lsRoot.deleteObjectsModifiedOnOrAfterLedger(oldestLedger);
-    }
-
     if (mApplying || applySnap)
     {
         mSnapBucket = getBucket(i.snap);
         mSnapApplicator = std::make_unique<BucketApplicator>(
-            mApp, mMaxProtocolVersion, mSnapBucket);
+            mApp, mMaxProtocolVersion, mSnapBucket, mEntryTypeFilter);
         CLOG_DEBUG(History, "ApplyBuckets : starting level[{}].snap = {}",
                    mLevel, i.snap);
         mApplying = true;
@@ -140,7 +156,7 @@ ApplyBucketsWork::startLevel()
     {
         mCurrBucket = getBucket(i.curr);
         mCurrApplicator = std::make_unique<BucketApplicator>(
-            mApp, mMaxProtocolVersion, mCurrBucket);
+            mApp, mMaxProtocolVersion, mCurrBucket, mEntryTypeFilter);
         CLOG_DEBUG(History, "ApplyBuckets : starting level[{}].curr = {}",
                    mLevel, i.curr);
         mApplying = true;
@@ -152,15 +168,6 @@ BasicWork::State
 ApplyBucketsWork::onRun()
 {
     ZoneScoped;
-    if (!mHaveCheckedApplyStateValidity && mLevel == BucketList::kNumLevels - 1)
-    {
-        if (!mApplyState.containsValidBuckets(mApp))
-        {
-            CLOG_ERROR(History, "Malformed HAS: unable to apply buckets");
-            return State::WORK_FAILURE;
-        }
-        mHaveCheckedApplyStateValidity = true;
-    }
 
     // Check if we're at the beginning of the new level
     if (isLevelComplete())
@@ -182,7 +189,8 @@ ApplyBucketsWork::onRun()
             return State::WORK_RUNNING;
         }
         mApp.getInvariantManager().checkOnBucketApply(
-            mSnapBucket, mApplyState.currentLedger, mLevel, false);
+            mSnapBucket, mApplyState.currentLedger, mLevel, false,
+            mEntryTypeFilter);
         mSnapApplicator.reset();
         mSnapBucket.reset();
         mBucketApplySuccess.Mark();
@@ -195,7 +203,8 @@ ApplyBucketsWork::onRun()
             return State::WORK_RUNNING;
         }
         mApp.getInvariantManager().checkOnBucketApply(
-            mCurrBucket, mApplyState.currentLedger, mLevel, true);
+            mCurrBucket, mApplyState.currentLedger, mLevel, true,
+            mEntryTypeFilter);
         mCurrApplicator.reset();
         mCurrBucket.reset();
         mBucketApplySuccess.Mark();

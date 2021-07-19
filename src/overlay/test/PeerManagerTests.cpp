@@ -10,8 +10,12 @@
 #include "overlay/PeerManager.h"
 #include "overlay/RandomPeerSource.h"
 #include "overlay/StellarXDR.h"
+#include "simulation/Simulation.h"
 #include "test/TestUtils.h"
+#include "test/TxTests.h"
 #include "test/test.h"
+#include "transactions/TransactionUtils.h"
+#include "xdr/Stellar-ledger.h"
 
 namespace stellar
 {
@@ -268,7 +272,7 @@ TEST_CASE("loadRandomPeers", "[overlay][PeerManager]")
     auto peerRecords = std::map<int, PeerRecord>{};
     for (auto time : {past, now, future})
     {
-        for (auto numFailures : {0, 1})
+        for (size_t numFailures : {0, 1})
         {
             for (auto type :
                  {PeerType::INBOUND, PeerType::OUTBOUND, PeerType::PREFERRED})
@@ -291,9 +295,9 @@ TEST_CASE("loadRandomPeers", "[overlay][PeerManager]")
                 return false;
             }
         }
-        if (peerQuery.mMaxNumFailures >= 0)
+        if (peerQuery.mMaxNumFailures.has_value())
         {
-            if (peerRecord.mNumFailures > peerQuery.mMaxNumFailures)
+            if (peerRecord.mNumFailures > *peerQuery.mMaxNumFailures)
             {
                 return false;
             }
@@ -326,13 +330,15 @@ TEST_CASE("loadRandomPeers", "[overlay][PeerManager]")
 
     for (auto useNextAttempt : {false, true})
     {
-        for (auto numFailures : {-1, 0})
+        for (std::optional<size_t> maxNumFailures :
+             {std::optional<size_t>(std::nullopt),
+              std::make_optional<size_t>(1)})
         {
             for (auto filter :
                  {PeerTypeFilter::INBOUND_ONLY, PeerTypeFilter::OUTBOUND_ONLY,
                   PeerTypeFilter::PREFERRED_ONLY, PeerTypeFilter::ANY_OUTBOUND})
             {
-                auto query = PeerQuery{useNextAttempt, numFailures, filter};
+                auto query = PeerQuery{useNextAttempt, maxNumFailures, filter};
                 auto ports = getPorts(query);
                 for (auto record : peerRecords)
                 {
@@ -511,7 +517,7 @@ TEST_CASE("purge peer table", "[overlay][PeerManager]")
     VirtualClock clock;
     auto app = createTestApplication(clock, getTestConfig());
     auto& peerManager = app->getOverlayManager().getPeerManager();
-    auto record = [](int numFailures) {
+    auto record = [](size_t numFailures) {
         return PeerRecord{{}, numFailures, static_cast<int>(PeerType::INBOUND)};
     };
 
@@ -534,5 +540,76 @@ TEST_CASE("purge peer table", "[overlay][PeerManager]")
 
     peerManager.removePeersWithManyFailures(2, &localhost2);
     REQUIRE(!peerManager.load(localhost(2)).second);
+}
+
+TEST_CASE("Peer fast-fails expected transactions", "[overlay][PeerManager]")
+{
+    auto networkID = sha256(getTestConfig().NETWORK_PASSPHRASE);
+
+    Simulation simulation(Simulation::OVER_LOOPBACK, networkID);
+
+    SIMULATION_CREATE_NODE(Initiator);
+    SIMULATION_CREATE_NODE(Acceptor);
+
+    SCPQuorumSet qSet;
+    qSet.threshold = 2;
+    qSet.validators.push_back(vInitiatorNodeID);
+    qSet.validators.push_back(vAcceptorNodeID);
+
+    simulation.addNode(vInitiatorSecretKey, qSet);
+    simulation.addNode(vAcceptorSecretKey, qSet);
+
+    simulation.addPendingConnection(vInitiatorSecretKey.getPublicKey(),
+                                    vAcceptorSecretKey.getPublicKey());
+
+    simulation.startAllNodes();
+
+    auto initiatorApp = simulation.getNode(vInitiatorNodeID);
+    auto acceptorApp = simulation.getNode(vAcceptorNodeID);
+
+    simulation.crankUntil(
+        [&]() {
+            return initiatorApp->getOverlayManager()
+                       .getAuthenticatedPeersCount() == 1;
+        },
+        std::chrono::milliseconds{500}, false);
+
+    auto loopbackPeerConnection =
+        simulation.getLoopbackConnection(vInitiatorNodeID, vAcceptorNodeID);
+
+    auto initiator = loopbackPeerConnection->getInitiator();
+    auto acceptor = loopbackPeerConnection->getAcceptor();
+
+    auto source = TestAccount{*initiatorApp, txtest::getAccount("source")};
+    auto destination =
+        TestAccount{*initiatorApp, txtest::getAccount("destination")};
+
+    auto testMessage = [&](int64_t paymentAmount) {
+        initiator->Peer::sendMessage(
+            source.tx({txtest::payment(destination, paymentAmount)})
+                ->toStellarMessage());
+
+        simulation.crankForAtMost(std::chrono::milliseconds{500}, false);
+    };
+
+    auto& recvTx =
+        acceptorApp->getMetrics().NewTimer({"overlay", "recv", "transaction"});
+
+    // We haven't sent any transaction messages yet.
+    REQUIRE(recvTx.count() == 0);
+
+    // A well-formed payment.
+    testMessage(1);
+
+    // We sent a transaction that should have passed fast validation.
+    REQUIRE(recvTx.count() == 1);
+
+    // A malformed payment: the amount is negative.
+    testMessage(-1);
+
+    // We sent another transaction, but it should have failed fast validation
+    // because it was malformed, so no more transactions should have been posted
+    // to the ASIO execution queue (which is what this metric counts).
+    REQUIRE(recvTx.count() == 1);
 }
 }

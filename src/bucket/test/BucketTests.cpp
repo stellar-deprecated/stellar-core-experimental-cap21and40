@@ -4,7 +4,7 @@
 
 // This file contains tests for individual Buckets, low-level invariants
 // concerning the composition of buckets, the semantics of the merge
-// operation(s), and the perfomance of merging and applying buckets to the
+// operation(s), and the performance of merging and applying buckets to the
 // database.
 
 // ASIO is somewhat particular about when it gets included -- it wants to be the
@@ -201,6 +201,10 @@ TEST_CASE("merging bucket entries", "[bucket]")
                     liveEntry.data.claimableBalance() =
                         LedgerTestUtils::generateValidClaimableBalanceEntry(10);
                     break;
+                case LIQUIDITY_POOL:
+                    liveEntry.data.liquidityPool() =
+                        LedgerTestUtils::generateValidLiquidityPoolEntry(10);
+                    break;
                 default:
                     abort();
                 }
@@ -227,6 +231,7 @@ TEST_CASE("merging bucket entries", "[bucket]")
         checkDeadAnnihilatesLive(OFFER);
         checkDeadAnnihilatesLive(DATA);
         checkDeadAnnihilatesLive(CLAIMABLE_BALANCE);
+        checkDeadAnnihilatesLive(LIQUIDITY_POOL);
 
         SECTION("random dead entries annihilates live entries")
         {
@@ -956,7 +961,6 @@ TEST_CASE("bucket apply", "[bucket]")
     Config cfg(getTestConfig());
     for_versions_with_differing_bucket_logic(cfg, [&](Config const& cfg) {
         Application::pointer app = createTestApplication(clock, cfg);
-        app->start();
 
         std::vector<LedgerEntry> live(10), noLive;
         std::vector<LedgerKey> dead, noDead;
@@ -1002,7 +1006,6 @@ TEST_CASE("bucket apply bench", "[bucketbench][!hide]")
         VirtualClock clock;
         Config cfg(getTestConfig(0, mode));
         Application::pointer app = createTestApplication(clock, cfg);
-        app->start();
 
         std::vector<LedgerEntry> live(100000);
         std::vector<LedgerKey> noDead;

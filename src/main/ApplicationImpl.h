@@ -33,6 +33,7 @@ class CommandHandler;
 class Database;
 class LedgerTxn;
 class LedgerTxnRoot;
+class InMemoryLedgerTxn;
 class InMemoryLedgerTxnRoot;
 class LoadGenerator;
 
@@ -42,7 +43,9 @@ class ApplicationImpl : public Application
     ApplicationImpl(VirtualClock& clock, Config const& cfg);
     virtual ~ApplicationImpl() override;
 
-    virtual void initialize(bool newDB) override;
+    virtual void initialize(bool newDB, bool forceRebuild) override;
+
+    virtual void resetLedgerState() override;
 
     virtual uint64_t timeNow() override;
 
@@ -94,6 +97,8 @@ class ApplicationImpl : public Application
     // returns.
     virtual void joinAllThreads() override;
 
+    virtual void validateAndLogConfig() override;
+
     virtual std::string
     manualClose(std::optional<uint32_t> const& manualLedgerSeq,
                 std::optional<TimePoint> const& manualCloseTime) override;
@@ -116,9 +121,14 @@ class ApplicationImpl : public Application
 
     virtual void reportInfo() override;
 
+    virtual std::shared_ptr<BasicWork>
+    scheduleSelfCheck(bool waitUntilNextCheckpoint) override;
+
     virtual Hash const& getNetworkID() const override;
 
     virtual AbstractLedgerTxnParent& getLedgerTxnRoot() override;
+
+    virtual void resetDBForInMemoryMode() override;
 
   protected:
     std::unique_ptr<LedgerManager>
@@ -143,9 +153,9 @@ class ApplicationImpl : public Application
     asio::io_context mWorkerIOContext;
     std::unique_ptr<asio::io_context::work> mWork;
 
+    std::unique_ptr<BucketManager> mBucketManager;
     std::unique_ptr<Database> mDatabase;
     std::unique_ptr<OverlayManager> mOverlayManager;
-    std::unique_ptr<BucketManager> mBucketManager;
     std::unique_ptr<CatchupManager> mCatchupManager;
     std::unique_ptr<HerderPersistence> mHerderPersistence;
     std::unique_ptr<HistoryArchiveManager> mHistoryArchiveManager;
@@ -153,25 +163,27 @@ class ApplicationImpl : public Application
     std::unique_ptr<InvariantManager> mInvariantManager;
     std::unique_ptr<Maintainer> mMaintainer;
     std::shared_ptr<ProcessManager> mProcessManager;
-    std::unique_ptr<CommandHandler> mCommandHandler;
     std::shared_ptr<WorkScheduler> mWorkScheduler;
     std::unique_ptr<PersistentState> mPersistentState;
     std::unique_ptr<BanManager> mBanManager;
     std::unique_ptr<StatusManager> mStatusManager;
     std::unique_ptr<AbstractLedgerTxnParent> mLedgerTxnRoot;
 
-    // This exists for use in MODE_USES_IN_MEMORY_LEDGER only: the
-    // mLedgerTxnRoot will be an InMemoryLedgerTxnRoot which is a _stub_
-    // AbstractLedgerTxnParent that refuses all commits and answers null to all
-    // queries; then an inner "never-committing" sub-LedgerTxn is constructed
-    // beneath it that serves as the "effective" in-memory root transaction,
-    // is returned when a client requests the root.
+    // These two exist for use in MODE_USES_IN_MEMORY_LEDGER only: the
+    // mInMemoryLedgerTxnRoot is a _stub_ AbstractLedgerTxnParent that refuses
+    // all commits and answers null to all queries; then an inner
+    // "never-committing" sub-LedgerTxn is constructed beneath it that serves as
+    // the "effective" in-memory root transaction, is returned when a client
+    // requests the root.
     //
     // Note that using this only works when the ledger can fit in RAM -- as it
     // is held in the never-committing LedgerTxn in its entirety -- so if it
     // ever grows beyond RAM-size you need to use a mode with some sort of
     // database on secondary storage.
-    std::unique_ptr<LedgerTxn> mNeverCommittingLedgerTxn;
+    std::unique_ptr<InMemoryLedgerTxnRoot> mInMemoryLedgerTxnRoot;
+    std::unique_ptr<InMemoryLedgerTxn> mNeverCommittingLedgerTxn;
+
+    std::unique_ptr<CommandHandler> mCommandHandler;
 
 #ifdef BUILD_TESTS
     std::unique_ptr<LoadGenerator> mLoadGenerator;
@@ -185,6 +197,7 @@ class ApplicationImpl : public Application
     bool mStopping;
 
     VirtualTimer mStoppingTimer;
+    VirtualTimer mSelfCheckTimer;
 
     std::unique_ptr<medida::MetricsRegistry> mMetrics;
     medida::Counter& mAppStateCurrent;
@@ -194,8 +207,11 @@ class ApplicationImpl : public Application
 
     Hash mNetworkID;
 
+    // A handle to any running self-check, to avoid scheduling
+    // more than one concurrently.
+    std::weak_ptr<BasicWork> mRunningSelfCheck;
+
     void newDB();
-    void upgradeDB();
 
     void shutdownMainIOContext();
     void shutdownWorkScheduler();
@@ -216,5 +232,8 @@ class ApplicationImpl : public Application
 
     void
     advanceToLedgerBeforeManualCloseTarget(uint32_t const& targetLedgerSeq);
+
+    void upgradeToCurrentSchemaAndMaybeRebuildLedger(bool applyBuckets,
+                                                     bool forceRebuild);
 };
 }

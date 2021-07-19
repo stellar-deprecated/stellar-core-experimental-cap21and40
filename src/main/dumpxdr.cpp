@@ -62,8 +62,7 @@ dumpstream(XDRInputFileStream& in, bool compact)
 void
 dumpXdrStream(std::string const& filename, bool compact)
 {
-    std::regex rx(
-        ".*(ledger|bucket|transactions|results|scp)-[[:xdigit:]]+\\.xdr");
+    std::regex rx(".*(ledger|bucket|transactions|results|meta|scp)-.+\\.xdr");
     std::smatch sm;
     if (std::regex_match(filename, sm, rx))
     {
@@ -85,6 +84,10 @@ dumpXdrStream(std::string const& filename, bool compact)
         else if (sm[1] == "results")
         {
             dumpstream<TransactionHistoryResultEntry>(in, compact);
+        }
+        else if (sm[1] == "meta")
+        {
+            dumpstream<LedgerCloseMeta>(in, compact);
         }
         else
         {
@@ -265,7 +268,7 @@ printXdr(std::string const& filename, std::string const& filetype, bool base64,
                     processed = true;
                     break;
                 }
-                catch (xdr::xdr_runtime_error)
+                catch (xdr::xdr_runtime_error&)
                 {
                 }
             }
@@ -445,7 +448,7 @@ signtxn(std::string const& filename, std::string netId, bool base64)
         auto& signatures = txbridge::getSignatures(txenv);
         if (signatures.size() == signatures.max_size())
             throw std::runtime_error(
-                "Evelope already contains maximum number of signatures");
+                "Envelope already contains maximum number of signatures");
 
         SecretKey sk(SecretKey::fromStrKeySeed(readSecret(
             fmt::format("Secret key seed [network id: '{}']: ", netId),

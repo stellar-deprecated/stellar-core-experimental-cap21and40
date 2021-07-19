@@ -130,7 +130,7 @@ applyCheck(TransactionFramePtr tx, Application& app, bool checkSeqNum)
     {
         LedgerTxn ltxFeeProc(ltx);
         // use checkedTx here for validity check as to keep tx untouched
-        check = checkedTx->checkValid(ltxFeeProc, 0, 0, 0);
+        check = checkValid(checkedTx, ltxFeeProc);
         checkResult = checkedTx->getResult();
         REQUIRE((!check || checkResult.result.code() == txSUCCESS));
 
@@ -383,7 +383,8 @@ applyTx(TransactionFramePtr const& tx, Application& app, bool checkSeqNum)
 void
 validateTxResults(TransactionFramePtr const& tx, Application& app,
                   ValidationResult validationResult,
-                  TransactionResult const& applyResult)
+                  TransactionResult const& applyResult,
+                  ValidateTxResultsType validateType)
 {
     auto shouldValidateOk = validationResult.code == txSUCCESS;
 
@@ -391,7 +392,22 @@ validateTxResults(TransactionFramePtr const& tx, Application& app,
         app.getNetworkID(), tx->getEnvelope());
     {
         LedgerTxn ltx(app.getLedgerTxnRoot());
-        REQUIRE(checkedTx->checkValid(ltx, 0, 0, 0) == shouldValidateOk);
+
+        switch (validateType)
+        {
+        case ValidateTxResultsType::VALIDATE_CONSISTENCY_ONLY:
+            REQUIRE(checkValid(checkedTx, ltx) == shouldValidateOk);
+            break;
+        case ValidateTxResultsType::VALIDATE_BOTH_FAIL:
+            requireCheckValidFormsBothFail(checkedTx, ltx);
+            break;
+        case ValidateTxResultsType::VALIDATE_BOTH_PASS:
+            requireCheckValidFormsBothPass(checkedTx, ltx);
+            break;
+        case ValidateTxResultsType::VALIDATE_ONLY_FULL_CHECK_FAILS:
+            requireOnlyFullCheckFails(checkedTx, ltx);
+            break;
+        }
     }
     REQUIRE(checkedTx->getResult().result.code() == validationResult.code);
     REQUIRE(checkedTx->getResult().feeCharged == validationResult.fee);
@@ -417,6 +433,82 @@ validateTxResults(TransactionFramePtr const& tx, Application& app,
     REQUIRE(tx->getResult() == applyResult);
     REQUIRE(applyOk == shouldApplyOk);
 };
+
+bool
+checkValid(TransactionFrameBasePtr tx, AbstractLedgerTxn& ltx,
+           SequenceNumber current, uint64_t lowerBoundCloseTimeOffset,
+           uint64_t upperBoundCloseTimeOffset, bool fullCheck)
+{
+    auto otherCheckTx = TransactionFrameBase::makeTransactionFromWire(
+        tx->getNetworkID(), tx->getEnvelope());
+
+    TransactionFrameBasePtr fullCheckTx, partialCheckTx;
+    if (fullCheck)
+    {
+        fullCheckTx = tx;
+        partialCheckTx = otherCheckTx;
+    }
+    else
+    {
+        fullCheckTx = otherCheckTx;
+        partialCheckTx = tx;
+    }
+
+    auto const fullCheckResult =
+        fullCheckTx->checkValid(ltx, current, lowerBoundCloseTimeOffset,
+                                upperBoundCloseTimeOffset, true);
+    auto const partialCheckResult =
+        partialCheckTx->checkValid(ltx, current, lowerBoundCloseTimeOffset,
+                                   upperBoundCloseTimeOffset, false);
+
+    // Validate consistency between full and partial checks.
+    if (fullCheckResult)
+    {
+        REQUIRE(partialCheckResult);
+    }
+
+    return fullCheck ? fullCheckResult : partialCheckResult;
+}
+
+void
+requireOnlyFullCheckFails(TransactionFrameBasePtr tx, AbstractLedgerTxn& ltx,
+                          SequenceNumber current,
+                          uint64_t lowerBoundCloseTimeOffset,
+                          uint64_t upperBoundCloseTimeOffset)
+{
+    REQUIRE(tx->checkValid(ltx, current, lowerBoundCloseTimeOffset,
+                           upperBoundCloseTimeOffset, false));
+    REQUIRE(!tx->checkValid(ltx, current, lowerBoundCloseTimeOffset,
+                            upperBoundCloseTimeOffset, true));
+}
+
+// Because of the consistency condition between the two forms of
+// checkValid(), which is checked by txtest::checkValid() above, we can
+// assert that both checks fail just by asserting that a partial
+// txtest::checkValid() fails.
+void
+requireCheckValidFormsBothFail(TransactionFrameBasePtr tx,
+                               AbstractLedgerTxn& ltx, SequenceNumber current,
+                               uint64_t lowerBoundCloseTimeOffset,
+                               uint64_t upperBoundCloseTimeOffset)
+{
+    REQUIRE(!checkValid(tx, ltx, current, lowerBoundCloseTimeOffset,
+                        upperBoundCloseTimeOffset, false));
+}
+
+// Because of the consistency condition between the two forms of
+// checkValid(), which is checked by txtest::checkValid() above, we can
+// assert that both checks pass just by asserting that a full
+// txtest::checkValid() passes.
+void
+requireCheckValidFormsBothPass(TransactionFrameBasePtr tx,
+                               AbstractLedgerTxn& ltx, SequenceNumber current,
+                               uint64_t lowerBoundCloseTimeOffset,
+                               uint64_t upperBoundCloseTimeOffset)
+{
+    REQUIRE(checkValid(tx, ltx, current, lowerBoundCloseTimeOffset,
+                       upperBoundCloseTimeOffset, true));
+}
 
 TxSetResultMeta
 closeLedgerOn(Application& app, uint32 ledgerSeq, int day, int month, int year,
@@ -467,12 +559,8 @@ closeLedgerOn(Application& app, uint32 ledgerSeq, time_t closeTime,
         REQUIRE(txSet->checkValid(app, 0, 0));
     }
 
-    StellarValue sv = app.getHerder().makeStellarValue(
-        txSet->getContentsHash(), closeTime, emptyUpgradeSteps,
-        app.getConfig().NODE_SEED);
-
-    LedgerCloseData ledgerData(ledgerSeq, txSet, sv);
-    app.getLedgerManager().closeLedger(ledgerData);
+    app.getHerder().externalizeValue(txSet, ledgerSeq, closeTime,
+                                     emptyUpgradeSteps);
 
     auto z1 = getTransactionHistoryResults(app.getDatabase(), ledgerSeq);
     auto z2 = getTransactionFeeMeta(app.getDatabase(), ledgerSeq);
@@ -602,6 +690,12 @@ transactionFromOperations(Application& app, SecretKey const& from,
 Operation
 changeTrust(Asset const& asset, int64_t limit)
 {
+    return changeTrust(assetToChangeTrustAsset(asset), limit);
+}
+
+Operation
+changeTrust(ChangeTrustAsset const& asset, int64_t limit)
+{
     Operation op;
 
     op.body.type(CHANGE_TRUST);
@@ -707,6 +801,18 @@ makeAssetAlphanum12(SecretKey const& issuer, std::string const& code)
     asset.alphaNum12().issuer = issuer.getPublicKey();
     strToAssetCode(asset.alphaNum12().assetCode, code);
     return asset;
+}
+
+ChangeTrustAsset
+makeChangeTrustAssetPoolShare(Asset const& assetA, Asset const& assetB,
+                              int32_t fee)
+{
+    ChangeTrustAsset poolAsset;
+    poolAsset.type(ASSET_TYPE_POOL_SHARE);
+    poolAsset.liquidityPool().constantProduct().assetA = assetA;
+    poolAsset.liquidityPool().constantProduct().assetB = assetB;
+    poolAsset.liquidityPool().constantProduct().fee = fee;
+    return poolAsset;
 }
 
 Operation

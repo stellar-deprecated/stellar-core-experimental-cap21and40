@@ -28,8 +28,6 @@ TEST_CASE("change trust", "[tx][changetrust]")
     VirtualClock clock;
     auto app = createTestApplication(clock, cfg);
 
-    app->start();
-
     // set up world
     auto root = TestAccount::createRoot(*app);
     auto const minBalance2 = app->getLedgerManager().getLastMinBalance(2);
@@ -124,7 +122,7 @@ TEST_CASE("change trust", "[tx][changetrust]")
         validateTrustLineIsConst();
 
         for_versions_to(2, *app, [&] {
-            // create a trustline with a limit of INT64_MAX - 1 wil lfail
+            // create a trustline with a limit of INT64_MAX - 1 will fail
             REQUIRE_THROWS_AS(gateway.changeTrust(idr, INT64_MAX - 1),
                               ex_CHANGE_TRUST_INVALID_LIMIT);
             validateTrustLineIsConst();
@@ -266,5 +264,18 @@ TEST_CASE("change trust", "[tx][changetrust]")
             *app, acc2, changeTrust(idr, 1000), changeTrust(idr, 999),
             changeTrust(idr, 1001), changeTrust(idr, 0),
             trustlineKey(acc2, idr));
+    }
+
+    SECTION("pool trustline")
+    {
+        auto usd = makeAsset(gateway, "USD");
+        auto idrUsd =
+            makeChangeTrustAssetPoolShare(idr, usd, LIQUIDITY_POOL_FEE_V18);
+
+        // Liquidity pools not supported pre V18
+        for_versions_to(17, *app, [&] {
+            REQUIRE_THROWS_AS(root.changeTrust(idrUsd, 10),
+                              ex_CHANGE_TRUST_MALFORMED);
+        });
     }
 }

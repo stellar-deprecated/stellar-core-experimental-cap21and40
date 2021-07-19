@@ -321,8 +321,9 @@ HistoryArchiveState::containsValidBuckets(Application& app) const
     };
 
     // Iterate bottom-up, from oldest to newest buckets
-    for (uint32_t i = BucketList::kNumLevels - 1; i >= 0; i--)
+    for (uint32_t j = BucketList::kNumLevels; j != 0; --j)
     {
+        auto i = j - 1;
         auto const& level = currentBuckets[i];
 
         // Note: snap is always older than curr, and therefore must be processed
@@ -446,10 +447,6 @@ HistoryArchiveState::HistoryArchiveState(uint32_t ledgerSeq,
 HistoryArchive::HistoryArchive(Application& app,
                                HistoryArchiveConfiguration const& config)
     : mConfig(config)
-    , mSuccessMeter(app.getMetrics().NewMeter(
-          {"history-archive", config.mName, "success"}, "event"))
-    , mFailureMeter(app.getMetrics().NewMeter(
-          {"history-archive", config.mName, "failure"}, "event"))
 {
 }
 
@@ -505,29 +502,5 @@ HistoryArchive::mkdirCmd(std::string const& remoteDir) const
     if (mConfig.mMkdirCmd.empty())
         return "";
     return formatString(mConfig.mMkdirCmd, remoteDir);
-}
-
-void
-HistoryArchive::markSuccess()
-{
-    mSuccessMeter.Mark();
-}
-
-void
-HistoryArchive::markFailure()
-{
-    mFailureMeter.Mark();
-}
-
-uint64_t
-HistoryArchive::getSuccessCount() const
-{
-    return mSuccessMeter.count();
-}
-
-uint64_t
-HistoryArchive::getFailureCount() const
-{
-    return mFailureMeter.count();
 }
 }

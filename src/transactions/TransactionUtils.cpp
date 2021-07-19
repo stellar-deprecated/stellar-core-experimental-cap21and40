@@ -3,6 +3,7 @@
 // of this distribution or at http://www.apache.org/licenses/LICENSE-2.0
 
 #include "transactions/TransactionUtils.h"
+#include "crypto/SHA.h"
 #include "crypto/SecretKey.h"
 #include "ledger/InternalLedgerEntry.h"
 #include "ledger/LedgerTxn.h"
@@ -142,7 +143,7 @@ trustlineKey(AccountID const& accountID, Asset const& asset)
 {
     LedgerKey key(TRUSTLINE);
     key.trustLine().accountID = accountID;
-    key.trustLine().asset = asset;
+    key.trustLine().asset = assetToTrustLineAsset(asset);
     return key;
 }
 
@@ -169,6 +170,14 @@ claimableBalanceKey(ClaimableBalanceID const& balanceID)
 {
     LedgerKey key(CLAIMABLE_BALANCE);
     key.claimableBalance().balanceID = balanceID;
+    return key;
+}
+
+LedgerKey
+liquidityPoolKey(PoolID const& poolID)
+{
+    LedgerKey key(LIQUIDITY_POOL);
+    key.liquidityPool().liquidityPoolID = poolID;
     return key;
 }
 
@@ -797,13 +806,17 @@ getSellingLiabilities(LedgerTxnHeader const& header,
     return getSellingLiabilities(header.current(), entry.current());
 }
 
-uint64_t
+SequenceNumber
 getStartingSequenceNumber(uint32_t ledgerSeq)
 {
-    return static_cast<uint64_t>(ledgerSeq) << 32;
+    if (ledgerSeq > static_cast<uint32_t>(std::numeric_limits<int32_t>::max()))
+    {
+        throw std::runtime_error("overflowed getStartingSequenceNumber");
+    }
+    return static_cast<SequenceNumber>(ledgerSeq) << 32;
 }
 
-uint64_t
+SequenceNumber
 getStartingSequenceNumber(LedgerTxnHeader const& header)
 {
     return getStartingSequenceNumber(header.current().ledgerSeq);
@@ -870,11 +883,16 @@ isClawbackEnabledOnTrustline(LedgerTxnEntry const& entry)
 }
 
 bool
+isClawbackEnabledOnClaimableBalance(ClaimableBalanceEntry const& entry)
+{
+    return entry.ext.v() == 1 && (entry.ext.v1().flags &
+                                  CLAIMABLE_BALANCE_CLAWBACK_ENABLED_FLAG) != 0;
+}
+
+bool
 isClawbackEnabledOnClaimableBalance(LedgerEntry const& entry)
 {
-    return entry.data.claimableBalance().ext.v() == 1 &&
-           (entry.data.claimableBalance().ext.v1().flags &
-            CLAIMABLE_BALANCE_CLAWBACK_ENABLED_FLAG) != 0;
+    return isClawbackEnabledOnClaimableBalance(entry.data.claimableBalance());
 }
 
 bool
@@ -942,7 +960,7 @@ trustLineFlagMaskCheckIsValid(uint32_t flag, uint32_t ledgerVersion)
     }
     else
     {
-        return (flag & ~MASK_TRUSTLINE_FLAGS_V16) == 0;
+        return (flag & ~MASK_TRUSTLINE_FLAGS_V17) == 0;
     }
 }
 
@@ -973,7 +991,7 @@ accountFlagMaskCheckIsValid(uint32_t flag, uint32_t ledgerVersion)
         return (flag & ~MASK_ACCOUNT_FLAGS) == 0;
     }
 
-    return (flag & ~MASK_ACCOUNT_FLAGS_V16) == 0;
+    return (flag & ~MASK_ACCOUNT_FLAGS_V17) == 0;
 }
 
 AccountID
@@ -1108,6 +1126,70 @@ removeOffersByAccountAndAsset(AbstractLedgerTxn& ltx, AccountID const& account,
     ltxInner.commit();
 }
 
+template <typename T>
+T
+assetConversionHelper(Asset const& asset)
+{
+    T otherAsset;
+    otherAsset.type(asset.type());
+
+    switch (asset.type())
+    {
+    case stellar::ASSET_TYPE_NATIVE:
+        break;
+    case stellar::ASSET_TYPE_CREDIT_ALPHANUM4:
+        otherAsset.alphaNum4() = asset.alphaNum4();
+        break;
+    case stellar::ASSET_TYPE_CREDIT_ALPHANUM12:
+        otherAsset.alphaNum12() = asset.alphaNum12();
+        break;
+    case stellar::ASSET_TYPE_POOL_SHARE:
+        throw std::runtime_error("Asset can't have type ASSET_TYPE_POOL_SHARE");
+    default:
+        throw std::runtime_error("Unknown asset type");
+    }
+
+    return otherAsset;
+}
+
+TrustLineAsset
+assetToTrustLineAsset(Asset const& asset)
+{
+    return assetConversionHelper<TrustLineAsset>(asset);
+}
+
+ChangeTrustAsset
+assetToChangeTrustAsset(Asset const& asset)
+{
+    return assetConversionHelper<ChangeTrustAsset>(asset);
+}
+
+TrustLineAsset
+changeTrustAssetToTrustLineAsset(ChangeTrustAsset const& ctAsset)
+{
+    TrustLineAsset tlAsset;
+    tlAsset.type(ctAsset.type());
+
+    switch (ctAsset.type())
+    {
+    case stellar::ASSET_TYPE_NATIVE:
+        break;
+    case stellar::ASSET_TYPE_CREDIT_ALPHANUM4:
+        tlAsset.alphaNum4() = ctAsset.alphaNum4();
+        break;
+    case stellar::ASSET_TYPE_CREDIT_ALPHANUM12:
+        tlAsset.alphaNum12() = ctAsset.alphaNum12();
+        break;
+    case stellar::ASSET_TYPE_POOL_SHARE:
+        tlAsset.liquidityPoolID() = xdrSha256(ctAsset.liquidityPool());
+        break;
+    default:
+        throw std::runtime_error("Unknown asset type");
+    }
+
+    return tlAsset;
+}
+
 namespace detail
 {
 struct MuxChecker
@@ -1151,5 +1233,26 @@ hasMuxedAccount(TransactionEnvelope const& e)
     detail::MuxChecker c;
     c(e);
     return c.mHasMuxedAccount;
+}
+
+ClaimAtom
+makeClaimAtom(uint32_t ledgerVersion, AccountID const& accountID,
+              int64_t offerID, Asset const& wheat, int64_t numWheatReceived,
+              Asset const& sheep, int64_t numSheepSend)
+{
+    ClaimAtom atom;
+    if (ledgerVersion <= 17)
+    {
+        atom.type(CLAIM_ATOM_TYPE_V0);
+        atom.v0() = ClaimOfferAtomV0(accountID.ed25519(), offerID, wheat,
+                                     numWheatReceived, sheep, numSheepSend);
+    }
+    else
+    {
+        atom.type(CLAIM_ATOM_TYPE_ORDER_BOOK);
+        atom.orderBook() = ClaimOfferAtom(
+            accountID, offerID, wheat, numWheatReceived, sheep, numSheepSend);
+    }
+    return atom;
 }
 } // namespace stellar

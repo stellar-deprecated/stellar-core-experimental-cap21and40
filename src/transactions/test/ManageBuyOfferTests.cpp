@@ -45,7 +45,6 @@ TEST_CASE("manage buy offer failure modes", "[tx][offers]")
 {
     VirtualClock clock;
     auto app = createTestApplication(clock, getTestConfig());
-    app->start();
 
     int64_t const txfee = app->getLedgerManager().getLastTxFee();
     int64_t const minBalancePlusFees =
@@ -355,7 +354,6 @@ TEST_CASE("manage buy offer liabilities", "[tx][offers]")
 {
     VirtualClock clock;
     auto app = createTestApplication(clock, getTestConfig());
-    app->start();
 
     auto checkLiabilities = [&](std::string const& section, int64_t buyAmount,
                                 Price const& price, int64_t expectedBuying,
@@ -375,7 +373,7 @@ TEST_CASE("manage buy offer liabilities", "[tx][offers]")
 
             {
                 LedgerTxn ltx(app->getLedgerTxnRoot());
-                tx->checkValid(ltx, 0, 0, 0);
+                txtest::checkValid(tx, ltx);
             }
 
             auto buyOp = std::static_pointer_cast<ManageBuyOfferOpFrame>(
@@ -417,11 +415,13 @@ TEST_CASE("manage buy offer liabilities", "[tx][offers]")
 
             SECTION("with rounding")
             {
-                checkLiabilities("buy one for two", INT64_MAX, Price{2, 1},
-                                 bigDivide((uint128_t)INT64_MAX, 2, ROUND_DOWN),
-                                 INT64_MAX - 1);
+                checkLiabilities(
+                    "buy one for two", INT64_MAX, Price{2, 1},
+                    bigDivide(static_cast<uint64_t>(INT64_MAX), 2, ROUND_DOWN),
+                    INT64_MAX - 1);
                 checkLiabilities("buy two for five", INT64_MAX, Price{5, 2},
-                                 bigDivide(INT64_MAX, 2, 5, ROUND_DOWN),
+                                 bigDivide(static_cast<uint64_t>(INT64_MAX), 2,
+                                           5, ROUND_DOWN),
                                  INT64_MAX - 2);
             }
         }
@@ -434,7 +434,6 @@ TEST_CASE("manage buy offer exactly crosses existing offers", "[tx][offers]")
 {
     VirtualClock clock;
     auto app = createTestApplication(clock, getTestConfig());
-    app->start();
 
     int64_t const txfee = app->getLedgerManager().getLastTxFee();
     int64_t const minBalancePlusFees =
@@ -484,7 +483,6 @@ TEST_CASE("manage buy offer matches manage sell offer when not executing",
 {
     VirtualClock clock;
     auto app = createTestApplication(clock, getTestConfig());
-    app->start();
 
     int64_t const txfee = app->getLedgerManager().getLastTxFee();
     int64_t const minBalancePlusFees =
@@ -598,7 +596,6 @@ TEST_CASE("manage buy offer matches manage sell offer when executing partially",
 {
     VirtualClock clock;
     auto app = createTestApplication(clock, getTestConfig());
-    app->start();
 
     int64_t const txfee = app->getLedgerManager().getLastTxFee();
     int64_t const minBalancePlusFees =
@@ -739,7 +736,6 @@ TEST_CASE("manage buy offer matches manage sell offer when executing entirely",
 {
     VirtualClock clock;
     auto app = createTestApplication(clock, getTestConfig());
-    app->start();
 
     int64_t const txfee = app->getLedgerManager().getLastTxFee();
     int64_t const minBalancePlusFees =
@@ -879,7 +875,6 @@ TEST_CASE("manage buy offer with zero liabilities", "[tx][offers]")
 {
     VirtualClock clock;
     auto app = createTestApplication(clock, getTestConfig());
-    app->start();
 
     int64_t const txfee = app->getLedgerManager().getLastTxFee();
     int64_t const minBalancePlusFees =
@@ -934,7 +929,6 @@ TEST_CASE("manage buy offer releases liabilities before modify", "[tx][offers]")
 {
     VirtualClock clock;
     auto app = createTestApplication(clock, getTestConfig());
-    app->start();
 
     int64_t const txfee = app->getLedgerManager().getLastTxFee();
     int64_t const minBalancePlusFees =

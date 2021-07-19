@@ -3,7 +3,6 @@
 // of this distribution or at http://www.apache.org/licenses/LICENSE-2.0
 
 #include "util/Backtrace.h"
-#include "config.h"
 #include "util/GlobalChecks.h"
 #include <cstdio>
 #include <cstdlib>
@@ -112,7 +111,7 @@ printCurrentBacktrace()
         switch (res)
         {
         case 0:
-            // Demangling succceeded, might or might-not have realloc'ed
+            // Demangling succeeded, might or might-not have realloc'ed
             if (d != demangleBuf || dsz != demangleBufSz)
             {
                 // Did realloc successfully; save the new realloc'ed

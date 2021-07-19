@@ -76,9 +76,43 @@ bool applyCheck(TransactionFramePtr tx, Application& app,
                 bool checkSeqNum = true);
 void applyTx(TransactionFramePtr const& tx, Application& app,
              bool checkSeqNum = true);
+
+enum class ValidateTxResultsType
+{
+    VALIDATE_CONSISTENCY_ONLY,
+    VALIDATE_BOTH_FAIL,
+    VALIDATE_BOTH_PASS,
+    VALIDATE_ONLY_FULL_CHECK_FAILS
+};
+
 void validateTxResults(TransactionFramePtr const& tx, Application& app,
                        ValidationResult validationResult,
-                       TransactionResult const& applyResult = {});
+                       TransactionResult const& applyResult = {},
+                       ValidateTxResultsType validateType =
+                           ValidateTxResultsType::VALIDATE_CONSISTENCY_ONLY);
+
+bool checkValid(TransactionFrameBasePtr tx, AbstractLedgerTxn& ltx,
+                SequenceNumber current = 0,
+                uint64_t lowerBoundCloseTimeOffset = 0,
+                uint64_t upperBoundCloseTimeOffset = 0, bool fullCheck = true);
+
+void requireOnlyFullCheckFails(TransactionFrameBasePtr tx,
+                               AbstractLedgerTxn& ltx,
+                               SequenceNumber current = 0,
+                               uint64_t lowerBoundCloseTimeOffset = 0,
+                               uint64_t upperBoundCloseTimeOffset = 0);
+
+void requireCheckValidFormsBothFail(TransactionFrameBasePtr tx,
+                                    AbstractLedgerTxn& ltx,
+                                    SequenceNumber current = 0,
+                                    uint64_t lowerBoundCloseTimeOffset = 0,
+                                    uint64_t upperBoundCloseTimeOffset = 0);
+
+void requireCheckValidFormsBothPass(TransactionFrameBasePtr tx,
+                                    AbstractLedgerTxn& ltx,
+                                    SequenceNumber current = 0,
+                                    uint64_t lowerBoundCloseTimeOffset = 0,
+                                    uint64_t upperBoundCloseTimeOffset = 0);
 
 TxSetResultMeta
 closeLedgerOn(Application& app, uint32 ledgerSeq, time_t closeTime,
@@ -119,6 +153,7 @@ TransactionFramePtr transactionFromOperations(Application& app,
                                               int fee = 0);
 
 Operation changeTrust(Asset const& asset, int64_t limit);
+Operation changeTrust(ChangeTrustAsset const& asset, int64_t limit);
 
 Operation allowTrust(PublicKey const& trustor, Asset const& asset,
                      uint32_t authorize);
@@ -221,6 +256,9 @@ Asset makeNativeAsset();
 Asset makeInvalidAsset();
 Asset makeAsset(SecretKey const& issuer, std::string const& code);
 Asset makeAssetAlphanum12(SecretKey const& issuer, std::string const& code);
+ChangeTrustAsset makeChangeTrustAssetPoolShare(Asset const& assetA,
+                                               Asset const& assetB,
+                                               int32_t fee);
 
 OperationFrame const& getFirstOperationFrame(TransactionFrame const& tx);
 OperationResult const& getFirstResult(TransactionFrame const& tx);

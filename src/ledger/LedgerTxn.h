@@ -338,9 +338,7 @@ class WorstBestOfferIterator
     std::shared_ptr<OfferDescriptor const> const& offerDescriptor() const;
 };
 
-void getTrustLineStrings(AccountID const& accountID, Asset const& asset,
-                         std::string& accountIDStr, std::string& issuerStr,
-                         std::string& assetCodeStr, uint32_t ledgerVersion);
+void validateTrustLineKey(uint32_t ledgerVersion, LedgerKey const& key);
 
 // An abstraction for an object that can be the parent of an AbstractLedgerTxn
 // (discussed below). Allows children to commit atomically to the parent. Has no
@@ -438,6 +436,10 @@ class AbstractLedgerTxnParent
     // Delete all claimable balance ledger entries. Will throw when called on
     // anything other than a (real or stub) root LedgerTxn.
     virtual void dropClaimableBalances() = 0;
+
+    // Delete all liquidity pool ledger entries. Will throw when called on
+    // anything other than a (real or stub) root LedgerTxn.
+    virtual void dropLiquidityPools() = 0;
 
     // Return the current cache hit rate for prefetched ledger entries, as a
     // fraction from 0.0 to 1.0. Will throw when called on anything other than a
@@ -608,7 +610,7 @@ class AbstractLedgerTxn : public AbstractLedgerTxnParent
     virtual bool hasSponsorshipEntry() const = 0;
 };
 
-class LedgerTxn final : public AbstractLedgerTxn
+class LedgerTxn : public AbstractLedgerTxn
 {
     class Impl;
     std::unique_ptr<Impl> mImpl;
@@ -704,6 +706,7 @@ class LedgerTxn final : public AbstractLedgerTxn
     void dropOffers() override;
     void dropTrustLines() override;
     void dropClaimableBalances() override;
+    void dropLiquidityPools() override;
     double getPrefetchHitRate() const override;
     uint32_t prefetch(UnorderedSet<LedgerKey> const& keys) override;
 
@@ -760,6 +763,7 @@ class LedgerTxnRoot : public AbstractLedgerTxnParent
     void dropOffers() override;
     void dropTrustLines() override;
     void dropClaimableBalances() override;
+    void dropLiquidityPools() override;
 
 #ifdef BUILD_TESTS
     void resetForFuzzer() override;

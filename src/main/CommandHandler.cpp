@@ -75,7 +75,7 @@ CommandHandler::CommandHandler(Application& app) : mApp(app)
 
     mServer->add404(std::bind(&CommandHandler::fileNotFound, this, _1, _2));
 
-    if (mApp.getConfig().MODE_STORES_HISTORY)
+    if (mApp.getConfig().modeStoresAnyHistory())
     {
         addRoute("dropcursor", &CommandHandler::dropcursor);
         addRoute("getcursor", &CommandHandler::getcursor);
@@ -469,7 +469,7 @@ CommandHandler::upgrades(std::string const& params, std::string& retStr)
         {
             tm = VirtualClock::isoStringToTm(upgradeTime);
         }
-        catch (std::exception)
+        catch (std::exception&)
         {
             retStr =
                 fmt::format("could not parse upgradetime: '{}'", upgradeTime);
@@ -500,7 +500,12 @@ void
 CommandHandler::selfCheck(std::string const&, std::string& retStr)
 {
     ZoneScoped;
-    mApp.getHistoryArchiveManager().scheduleHistoryArchiveReportWork();
+    // NB: this only runs the online "self-check" routine; running the
+    // offline "self-check" from command-line will also do an expensive,
+    // synchronous database-vs-bucketlist consistency check. We can't do
+    // that online since it would block for so long that the node would
+    // lose sync. So we just omit it here.
+    mApp.scheduleSelfCheck(true);
 }
 
 void

@@ -14,6 +14,7 @@
 #include "xdrpp/marshal.h"
 #include <fmt/format.h>
 #include <lib/json/json.h>
+#include <thread>
 #include <xdrpp/autocheck.h>
 
 using namespace stellar;
@@ -598,7 +599,7 @@ TEST_CASE("quorum intersection 8-org core-and-periphery dangling",
     //          |  X  |
     //          | / \ |
     //        org2---org3
-    //       /           \
+    //       /           \.
     //    org6           org7
     //
     auto orgs = generateOrgs(8, {3, 3, 3, 3, 2, 2, 2, 2});
@@ -647,7 +648,7 @@ TEST_CASE("quorum intersection 8-org core-and-periphery balanced",
     //      |   |  X  |   |
     //      |   | / \ |  /
     //      | org2---org3
-    //      |/  \        \
+    //      |/  \        \.
     //    org6   --------org7
     //
     auto orgs = generateOrgs(8, {3, 3, 3, 3, 2, 2, 2, 2});
@@ -694,8 +695,8 @@ TEST_CASE("quorum intersection 8-org core-and-periphery unbalanced",
     //          |  X  |
     //          | / \ |
     //        org2---org3
-    //       /  \     /  \
-    //    org6---\----    \
+    //       /  \     /  \.
+    //    org6---\----    \.
     //            -------- org7
     //
     auto orgs = generateOrgs(8, {3, 3, 3, 3, 2, 2, 2, 2});

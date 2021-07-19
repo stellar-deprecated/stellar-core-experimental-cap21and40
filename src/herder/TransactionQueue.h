@@ -59,7 +59,7 @@ class TxQueueLimiter;
 class TransactionQueue
 {
   public:
-    static int64_t const FEE_MULTIPLIER;
+    static uint64_t const FEE_MULTIPLIER;
 
     enum class AddResult
     {
@@ -135,7 +135,7 @@ class TransactionQueue
     AccountTxQueueInfo
     getAccountTransactionQueueInfo(AccountID const& accountID) const;
 
-    int countBanned(int index) const;
+    size_t countBanned(int index) const;
     bool isBanned(Hash const& hash) const;
 
     std::shared_ptr<TxSetFrame>
@@ -222,7 +222,9 @@ class TransactionQueue
 #endif
 };
 
-static const char* TX_STATUS_STRING[static_cast<int>(
-    TransactionQueue::AddResult::ADD_STATUS_COUNT)] = {
-    "PENDING", "DUPLICATE", "ERROR", "TRY_AGAIN_LATER", "FILTERED"};
+extern std::array<const char*,
+                  static_cast<int>(
+                      TransactionQueue::AddResult::ADD_STATUS_COUNT)>
+    TX_STATUS_STRING;
+
 }

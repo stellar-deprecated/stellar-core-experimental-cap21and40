@@ -74,18 +74,23 @@ class TransactionFrame : public TransactionFrameBase
                                       LedgerTxnHeader const& header,
                                       uint64_t lowerBoundCloseTimeOffset);
 
-    bool commonValidPreSeqNum(AbstractLedgerTxn& ltx, bool chargeFee,
-                              uint64_t lowerBoundCloseTimeOffset,
-                              uint64_t upperBoundCloseTimeOffset);
+    bool commonValidPreSourceAccountLoad(LedgerTxnHeader const& header,
+                                         bool chargeFee,
+                                         uint64_t lowerBoundCloseTimeOffset,
+                                         uint64_t upperBoundCloseTimeOffset);
 
-    virtual bool isBadSeq(int64_t seqNum) const;
+    virtual bool isBadSeq(LedgerTxnHeader const& header, int64_t seqNum) const;
 
+    // A partial check ("checkType" == FOR_VALIDITY_PARTIAL) can only
+    // definitively establish that a transaction is invalid, not that it is
+    // valid.  A partial check does not do signature verification or database
+    // access.
     ValidationType commonValid(SignatureChecker& signatureChecker,
                                AbstractLedgerTxn& ltxOuter,
-                               SequenceNumber current, bool applying,
-                               bool chargeFee,
+                               SequenceNumber current, bool chargeFee,
                                uint64_t lowerBoundCloseTimeOffset,
-                               uint64_t upperBoundCloseTimeOffset);
+                               uint64_t upperBoundCloseTimeOffset,
+                               CheckType checkType);
 
     virtual std::shared_ptr<OperationFrame>
     makeOperation(Operation const& op, OperationResult& res, size_t index);
@@ -122,6 +127,8 @@ class TransactionFrame : public TransactionFrameBase
 
     Hash const& getFullHash() const override;
     Hash const& getContentsHash() const override;
+
+    Hash const& getNetworkID() const override;
 
     std::vector<std::shared_ptr<OperationFrame>> const&
     getOperations() const
@@ -185,10 +192,11 @@ class TransactionFrame : public TransactionFrameBase
 
     bool checkValid(AbstractLedgerTxn& ltxOuter, SequenceNumber current,
                     bool chargeFee, uint64_t lowerBoundCloseTimeOffset,
-                    uint64_t upperBoundCloseTimeOffset);
+                    uint64_t upperBoundCloseTimeOffset, bool fullCheck);
     bool checkValid(AbstractLedgerTxn& ltxOuter, SequenceNumber current,
                     uint64_t lowerBoundCloseTimeOffset,
-                    uint64_t upperBoundCloseTimeOffset) override;
+                    uint64_t upperBoundCloseTimeOffset,
+                    bool fullCheck) override;
 
     void
     insertKeysForFeeProcessing(UnorderedSet<LedgerKey>& keys) const override;

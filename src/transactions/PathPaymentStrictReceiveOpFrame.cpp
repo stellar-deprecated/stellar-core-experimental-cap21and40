@@ -96,7 +96,7 @@ PathPaymentStrictReceiveOpFrame::doApply(AbstractLedgerTxn& ltx)
 
         int64_t amountSend = 0;
         int64_t amountRecv = 0;
-        std::vector<ClaimOfferAtom> offerTrail;
+        std::vector<ClaimAtom> offerTrail;
         if (!convert(ltx, maxOffersToCross, sendAsset, INT64_MAX, amountSend,
                      recvAsset, maxAmountRecv, amountRecv,
                      RoundingType::PATH_PAYMENT_STRICT_RECEIVE, offerTrail))
@@ -135,17 +135,19 @@ PathPaymentStrictReceiveOpFrame::doCheckValid(uint32_t ledgerVersion)
         setResultMalformed();
         return false;
     }
-    if (!isAssetValid(mPathPayment.sendAsset) ||
-        !isAssetValid(mPathPayment.destAsset))
+    if (!isAssetValid(mPathPayment.sendAsset, ledgerVersion) ||
+        !isAssetValid(mPathPayment.destAsset, ledgerVersion))
     {
         setResultMalformed();
         return false;
     }
-    auto const& p = mPathPayment.path;
-    if (!std::all_of(p.begin(), p.end(), isAssetValid))
+    for (auto const& p : mPathPayment.path)
     {
-        setResultMalformed();
-        return false;
+        if (!isAssetValid(p, ledgerVersion))
+        {
+            setResultMalformed();
+            return false;
+        }
     }
     return true;
 }

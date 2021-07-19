@@ -63,10 +63,10 @@ improvements described above).
 
 note: you may have to provide a default clang/clang++, this can be done in many ways.
 
-For example, this makes clang-8 the default:
+For example, this makes clang-10 the default:
 
 ```
-sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-8   81 --slave /usr/bin/clang++ clang++ /usr/bin/clang++-8    --slave /usr/share/man/man1/clang.1.gz clang.1.gz /usr/share/man/man1/clang-8.1.gz --slave /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-8  --slave /usr/bin/clang-format clang-format /usr/bin/clang-format-8 --slave /usr/bin/llvm-config llvm-config /usr/bin/llvm-config-8
+sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-10   81 --slave /usr/bin/clang++ clang++ /usr/bin/clang++-10    --slave /usr/share/man/man1/clang.1.gz clang.1.gz /usr/share/man/man1/clang-10.1.gz --slave /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-10  --slave /usr/bin/clang-format clang-format /usr/bin/clang-format-10 --slave /usr/bin/llvm-config llvm-config /usr/bin/llvm-config-10
 ```
 
 ## Building an instrumented stellar-core
@@ -143,6 +143,19 @@ mutations for all the slaves. Scripts for bootstrapping are generally easy to wr
 For a good place to start, check out some of the existing [AFL scripts and libraries][8]
 on Github.
 
+## Comparing changes against master
+
+Any changes to the fuzzer should be compared to master to make sure we aren't introducing
+undesirable behavior. A screenshot of the TUI mentioned above after running the fuzzer for
+similar times should be posted to the PR, but there is an important point to be aware
+of - you need to make sure to run the same testcases against master and the PR. Running
+`make fuzz` twice will use different runs of `gen-fuzz`, so comparisons will not be meaningful.
+
+What should be done instead is first create the `min-testcases` directory using `make fuzz` or 
+`make fuzz-testcases` (the former will create the tests and run afl, while the latter will just create
+the tests). Then you can run `afl-fuzz -m 500 -M main -t 250 -i min-testcases -o fuzz-findings ./stellar-core fuzz --ll ERROR --process-id 0 --mode=${FUZZER_MODE} @@` 
+with multiple versions of core, which will use the `min-testcases` directory previously created. If 
+you are using two directories to test master vs a PR, then you'll need to copy `min-testcases` to the other directory.
 
 ## Future directions
 

@@ -569,7 +569,7 @@ exchangeV10(Price price, int64_t maxWheatSend, int64_t maxWheatReceive,
 // Similarly, we investigate when (!wheatStays && price.n <= price.d). Then it
 // follows from sheepSend = 0 that
 //     wheatReceive = ceil(sheepSend * price.d / price.n)
-// so wheatReceive = 0. Similary, if wheatReceive = 0 then
+// so wheatReceive = 0. Similarly, if wheatReceive = 0 then
 //     wheatReceive = ceil(sheepSend * price.d / price.n)
 //                  >= ceil(sheepSend)
 //                  = sheepSend
@@ -822,7 +822,7 @@ adjustOffer(LedgerTxnHeader const& header, LedgerTxnEntry& offer,
 //         = floor(maxSheepReceive * price.d / price.n) * price.n
 //         <= (maxSheepReceive * price.d / price.n) * price.n
 //         = maxSheepReceive * price.d
-// which combined with the defition of wheatValue yields
+// which combined with the definition of wheatValue yields
 //     wheatValue' = maxWheatSend' * price.n
 // From this we find that
 //     wheatReceive' = floor(wheatValue' / price.n)
@@ -969,7 +969,7 @@ static CrossOfferResult
 crossOffer(AbstractLedgerTxn& ltx, LedgerTxnEntry& sellingWheatOffer,
            int64_t maxWheatReceived, int64_t& numWheatReceived,
            int64_t maxSheepSend, int64_t& numSheepSend,
-           std::vector<ClaimOfferAtom>& offerTrail)
+           std::vector<ClaimAtom>& offerTrail)
 {
     ZoneScoped;
     assert(maxWheatReceived > 0);
@@ -1077,8 +1077,10 @@ crossOffer(AbstractLedgerTxn& ltx, LedgerTxnEntry& sellingWheatOffer,
         ltxInner.commit();
     }
 
-    offerTrail.push_back(ClaimOfferAtom(accountBID, offerID, wheat,
-                                        numWheatReceived, sheep, numSheepSend));
+    // Always returns a CLAIM_ATOM_TYPE_V0 in this case
+    offerTrail.emplace_back(
+        makeClaimAtom(ltx.loadHeader().current().ledgerVersion, accountBID,
+                      offerID, wheat, numWheatReceived, sheep, numSheepSend));
     return (newAmount == 0) ? CrossOfferResult::eOfferTaken
                             : CrossOfferResult::eOfferPartial;
 }
@@ -1087,7 +1089,7 @@ static CrossOfferResult
 crossOfferV10(AbstractLedgerTxn& ltx, LedgerTxnEntry& sellingWheatOffer,
               int64_t maxWheatReceived, int64_t& numWheatReceived,
               int64_t maxSheepSend, int64_t& numSheepSend, bool& wheatStays,
-              RoundingType round, std::vector<ClaimOfferAtom>& offerTrail)
+              RoundingType round, std::vector<ClaimAtom>& offerTrail)
 {
     ZoneScoped;
     assert(maxWheatReceived > 0);
@@ -1210,8 +1212,9 @@ crossOfferV10(AbstractLedgerTxn& ltx, LedgerTxnEntry& sellingWheatOffer,
     // deactivated at this point. Specifically, you cannot use sellingWheatOffer
     // or offer (which is a reference) since it is not active (and may have been
     // erased) at this point.
-    offerTrail.push_back(ClaimOfferAtom(accountBID, offerID, wheat,
-                                        numWheatReceived, sheep, numSheepSend));
+    offerTrail.emplace_back(
+        makeClaimAtom(ltx.loadHeader().current().ledgerVersion, accountBID,
+                      offerID, wheat, numWheatReceived, sheep, numSheepSend));
     return res;
 }
 
@@ -1221,7 +1224,7 @@ convertWithOffers(
     int64_t& sheepSend, Asset const& wheat, int64_t maxWheatReceive,
     int64_t& wheatReceived, RoundingType round,
     std::function<OfferFilterResult(LedgerTxnEntry const&)> filter,
-    std::vector<ClaimOfferAtom>& offerTrail, int64_t maxOffersToCross)
+    std::vector<ClaimAtom>& offerTrail, int64_t maxOffersToCross)
 {
     ZoneScoped;
     std::string pairStr = assetToString(sheep);
@@ -1245,6 +1248,21 @@ convertWithOffers(
         {
             break;
         }
+
+        // Special behavior for offer 289733046 can only happen in protocol 15
+        if (gIsProductionNetwork &&
+            ltx.loadHeader().current().ledgerSeq == 34793621 &&
+            wheatOffer.current().data.offer().offerID == 289733046)
+        {
+            auto const sponsorStrKey = "GAS3CQSW3HE27IF5KDWKCM7K6FG6AHR"
+                                       "HWOUVBUWIRV4ZGTJMPBXNGATF";
+            auto const sponsorID =
+                KeyUtils::fromStrKey<PublicKey>(sponsorStrKey);
+
+            wheatOffer.current().ext.v(1);
+            wheatOffer.current().ext.v1().sponsoringID.activate() = sponsorID;
+        }
+
         if (filter && filter(wheatOffer) == OfferFilterResult::eStop)
         {
             return ConvertResult::eFilterStop;

@@ -23,8 +23,6 @@ TEST_CASE("clawbackClaimableBalance", "[tx][clawback][claimablebalance]")
     VirtualClock clock;
     auto app = createTestApplication(clock, cfg);
 
-    app->start();
-
     auto root = TestAccount::createRoot(*app);
 
     auto const minBalance4 = app->getLedgerManager().getLastMinBalance(4);
@@ -83,6 +81,18 @@ TEST_CASE("clawbackClaimableBalance", "[tx][clawback][claimablebalance]")
             gateway.clawbackClaimableBalance(balanceID);
         }
 
+        SECTION("clawback when issuer already has INT64_MAX liabilities")
+        {
+            auto usd = makeAsset(gateway, "USD");
+            gateway.manageOffer(0, usd, idr, Price{1, 1}, INT64_MAX);
+
+            validClaimant.v0().destination = a1;
+            auto balanceID =
+                a1.createClaimableBalance(idr, 99, {validClaimant});
+
+            gateway.clawbackClaimableBalance(balanceID);
+        }
+
         SECTION("clawback sponsored claimable balance")
         {
             auto sponsoredClaimableBalance = [&](TestAccount& account) {
@@ -101,7 +111,7 @@ TEST_CASE("clawbackClaimableBalance", "[tx][clawback][claimablebalance]")
                 {
                     LedgerTxn ltx(app->getLedgerTxnRoot());
                     TransactionMeta txm(2);
-                    REQUIRE(tx->checkValid(ltx, 0, 0, 0));
+                    REQUIRE(txtest::checkValid(tx, ltx));
                     REQUIRE(tx->apply(*app, ltx, txm));
                     REQUIRE(tx->getResultCode() == txSUCCESS);
 

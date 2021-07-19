@@ -403,7 +403,7 @@ TEST_CASE("Tx results verification", "[batching][resultsverification]")
             catchupSimulation.getApp().getClock().getIOContext(), true);
         out.open(ft.localPath_nogz());
         // Duplicate entries
-        for (int i = 0; i < entries.size(); ++i)
+        for (size_t i = 0; i < entries.size(); ++i)
         {
             out.writeOne(entries[0]);
         }
@@ -660,7 +660,7 @@ TEST_CASE("History catchup", "[history][catchup][acceptance]")
             "and closing ledger was externalized")
     {
         // 1 ledger is for publish-trigger, 1 ledger is catchup-trigger ledger,
-        // 3 ledgers are buffered, 1 ledger is cloding
+        // 3 ledgers are buffered, 1 ledger is closing
         catchupSimulation.ensureLedgerAvailable(checkpointLedger + 6);
         catchupSimulation.ensurePublishesComplete();
         REQUIRE(catchupSimulation.catchupOnline(app, checkpointLedger, 3));
@@ -998,7 +998,6 @@ TEST_CASE("HAS in publishqueue remains in pristine state until publish",
     BucketTests::for_versions_with_differing_bucket_logic(
         cfg, [&](Config const& cfg) {
             Application::pointer app = createTestApplication(clock, cfg);
-            app->start();
             auto& hm = app->getHistoryManager();
             auto& lm = app->getLedgerManager();
             auto& bl = app->getBucketManager().getBucketList();
@@ -1053,7 +1052,6 @@ TEST_CASE("persist publish queue", "[history][publish][acceptance]")
     {
         VirtualClock clock;
         Application::pointer app0 = createTestApplication(clock, cfg);
-        app0->start();
         auto& hm0 = app0->getHistoryManager();
         while (hm0.getPublishQueueCount() < 5)
         {
@@ -1198,7 +1196,7 @@ TEST_CASE("Catchup manual", "[history][catchup][acceptance]")
     auto dbMode = Config::TESTDB_IN_MEMORY_SQLITE;
 
     // Test every 10th scenario
-    for (auto i = 0; i < stellar::gCatchupRangeCases.size(); i += 10)
+    for (size_t i = 0; i < stellar::gCatchupRangeCases.size(); i += 10)
     {
         auto test = stellar::gCatchupRangeCases[i];
         auto configuration = test.second;

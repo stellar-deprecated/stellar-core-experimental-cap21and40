@@ -92,6 +92,12 @@ generateLedgerEntryWithSameKey(LedgerEntry const& leBase)
             le.data.claimableBalance().balanceID =
                 leBase.data.claimableBalance().balanceID;
             break;
+        case LIQUIDITY_POOL:
+            le.data.liquidityPool() =
+                LedgerTestUtils::generateValidLiquidityPoolEntry();
+            le.data.liquidityPool().liquidityPoolID =
+                leBase.data.liquidityPool().liquidityPoolID;
+            break;
         default:
             REQUIRE(false);
         }
@@ -103,7 +109,6 @@ TEST_CASE("LedgerTxn addChild", "[ledgertxn]")
 {
     VirtualClock clock;
     auto app = createTestApplication(clock, getTestConfig());
-    app->start();
 
     SECTION("with LedgerTxn parent")
     {
@@ -137,7 +142,6 @@ TEST_CASE("LedgerTxn commit into LedgerTxn", "[ledgertxn]")
 {
     VirtualClock clock;
     auto app = createTestApplication(clock, getTestConfig());
-    app->start();
 
     LedgerEntry le1 = LedgerTestUtils::generateValidLedgerEntry();
     le1.lastModifiedLedgerSeq = 1;
@@ -209,7 +213,6 @@ TEST_CASE("LedgerTxn rollback into LedgerTxn", "[ledgertxn]")
     auto runTest = [&](Config::TestDbMode mode) {
         VirtualClock clock;
         auto app = createTestApplication(clock, getTestConfig(0, mode));
-        app->start();
 
         LedgerEntry le1 = LedgerTestUtils::generateValidLedgerEntry();
         le1.lastModifiedLedgerSeq = 1;
@@ -410,7 +413,6 @@ TEST_CASE("LedgerTxn round trip", "[ledgertxn]")
         {
             VirtualClock clock;
             auto app = createTestApplication(clock, getTestConfig(0, mode));
-            app->start();
 
             LedgerTxn ltx1(app->getLedgerTxnRoot());
             runTest(ltx1);
@@ -422,7 +424,6 @@ TEST_CASE("LedgerTxn round trip", "[ledgertxn]")
             {
                 VirtualClock clock;
                 auto app = createTestApplication(clock, getTestConfig(0, mode));
-                app->start();
 
                 runTest(app->getLedgerTxnRoot());
             }
@@ -433,7 +434,6 @@ TEST_CASE("LedgerTxn round trip", "[ledgertxn]")
                 auto cfg = getTestConfig(0, mode);
                 cfg.ENTRY_CACHE_SIZE = 0;
                 auto app = createTestApplication(clock, cfg);
-                app->start();
 
                 runTest(app->getLedgerTxnRoot());
             }
@@ -457,7 +457,6 @@ TEST_CASE("LedgerTxn rollback and commit deactivate", "[ledgertxn]")
 {
     VirtualClock clock;
     auto app = createTestApplication(clock, getTestConfig());
-    app->start();
 
     auto& root = app->getLedgerTxnRoot();
     auto lh = root.getHeader();
@@ -510,7 +509,6 @@ TEST_CASE("LedgerTxn create", "[ledgertxn]")
 {
     VirtualClock clock;
     auto app = createTestApplication(clock, getTestConfig());
-    app->start();
 
     LedgerEntry le = LedgerTestUtils::generateValidLedgerEntry();
     le.lastModifiedLedgerSeq = 1;
@@ -571,7 +569,6 @@ TEST_CASE("LedgerTxn createOrUpdateWithoutLoading", "[ledgertxn]")
     auto runTest = [&](Config::TestDbMode mode) {
         VirtualClock clock;
         auto app = createTestApplication(clock, getTestConfig(0, mode));
-        app->start();
 
         LedgerEntry le = LedgerTestUtils::generateValidLedgerEntry();
         le.lastModifiedLedgerSeq = 1;
@@ -659,7 +656,6 @@ TEST_CASE("LedgerTxn erase", "[ledgertxn]")
     auto runTest = [&](Config::TestDbMode mode) {
         VirtualClock clock;
         auto app = createTestApplication(clock, getTestConfig(0, mode));
-        app->start();
 
         LedgerEntry le = LedgerTestUtils::generateValidLedgerEntry();
         le.lastModifiedLedgerSeq = 1;
@@ -733,7 +729,6 @@ TEST_CASE("LedgerTxn eraseWithoutLoading", "[ledgertxn]")
     auto runTest = [&](Config::TestDbMode mode) {
         VirtualClock clock;
         auto app = createTestApplication(clock, getTestConfig(0, mode));
-        app->start();
 
         LedgerEntry le = LedgerTestUtils::generateValidLedgerEntry();
         le.lastModifiedLedgerSeq = 1;
@@ -901,7 +896,7 @@ testInflationWinners(
     {
         VirtualClock clock;
         auto app = createTestApplication(clock, getTestConfig());
-        app->start();
+
         testAtRoot(*app);
     }
 
@@ -912,7 +907,7 @@ testInflationWinners(
         auto cfg = getTestConfig();
         cfg.ENTRY_CACHE_SIZE = 0;
         auto app = createTestApplication(clock, cfg);
-        app->start();
+
         testAtRoot(*app);
     }
 
@@ -920,7 +915,6 @@ testInflationWinners(
     {
         VirtualClock clock;
         auto app = createTestApplication(clock, getTestConfig());
-        app->start();
 
         testInflationWinners(app->getLedgerTxnRoot(), maxWinners, minBalance,
                              expected, updates.cbegin(), updates.cend());
@@ -954,7 +948,6 @@ TEST_CASE("LedgerTxn queryInflationWinners", "[ledgertxn]")
     {
         VirtualClock clock;
         auto app = createTestApplication(clock, getTestConfig());
-        app->start();
 
         LedgerTxn ltx1(app->getLedgerTxnRoot());
         LedgerTxn ltx2(ltx1);
@@ -965,7 +958,6 @@ TEST_CASE("LedgerTxn queryInflationWinners", "[ledgertxn]")
     {
         VirtualClock clock;
         auto app = createTestApplication(clock, getTestConfig());
-        app->start();
 
         LedgerTxn ltx1(app->getLedgerTxnRoot());
         ltx1.getDelta();
@@ -1214,7 +1206,6 @@ TEST_CASE("LedgerTxn loadHeader", "[ledgertxn]")
     auto runTest = [&](Config::TestDbMode mode) {
         VirtualClock clock;
         auto app = createTestApplication(clock, getTestConfig(0, mode));
-        app->start();
 
         LedgerHeader lh = autocheck::generator<LedgerHeader>()(5);
 
@@ -1270,7 +1261,6 @@ TEST_CASE("LedgerTxn load", "[ledgertxn]")
     auto runTest = [&](Config::TestDbMode mode) {
         VirtualClock clock;
         auto app = createTestApplication(clock, getTestConfig(0, mode));
-        app->start();
 
         LedgerEntry le = LedgerTestUtils::generateValidLedgerEntry();
         le.lastModifiedLedgerSeq = 1;
@@ -1355,9 +1345,7 @@ TEST_CASE("LedgerTxn load", "[ledgertxn]")
                         auto key = trustlineKey(acc2.getPublicKey(), asset);
 
                         // verify that this doesn't throw before V15
-                        getTrustLineStrings(key.trustLine().accountID,
-                                            key.trustLine().asset, accountIDStr,
-                                            issuerStr, assetCodeStr, 14);
+                        validateTrustLineKey(14, key);
 
                         REQUIRE_THROWS_AS(ltx1.load(key),
                                           NonSociRelatedException);
@@ -1378,7 +1366,7 @@ TEST_CASE("LedgerTxn load", "[ledgertxn]")
                         {
                             // this is fine
                         }
-                        catch (std::exception)
+                        catch (std::exception&)
                         {
                             REQUIRE(false);
                         }
@@ -1405,7 +1393,6 @@ TEST_CASE("LedgerTxn loadWithoutRecord", "[ledgertxn]")
 {
     VirtualClock clock;
     auto app = createTestApplication(clock, getTestConfig());
-    app->start();
 
     LedgerEntry le = LedgerTestUtils::generateValidLedgerEntry();
     le.lastModifiedLedgerSeq = 1;
@@ -1570,7 +1557,7 @@ testAllOffers(
     {
         VirtualClock clock;
         auto app = createTestApplication(clock, getTestConfig(0, mode));
-        app->start();
+
         testAtRoot(*app);
     }
 
@@ -1581,7 +1568,7 @@ testAllOffers(
         auto cfg = getTestConfig(0, mode);
         cfg.ENTRY_CACHE_SIZE = 0;
         auto app = createTestApplication(clock, cfg);
-        app->start();
+
         testAtRoot(*app);
     }
 
@@ -1589,7 +1576,6 @@ testAllOffers(
     {
         VirtualClock clock;
         auto app = createTestApplication(clock, getTestConfig(0, mode));
-        app->start();
 
         testAllOffers(app->getLedgerTxnRoot(), expected, updates.cbegin(),
                       updates.cend());
@@ -1609,7 +1595,6 @@ TEST_CASE("LedgerTxn loadAllOffers", "[ledgertxn]")
         {
             VirtualClock clock;
             auto app = createTestApplication(clock, getTestConfig(0, mode));
-            app->start();
 
             LedgerTxn ltx1(app->getLedgerTxnRoot());
             LedgerTxn ltx2(ltx1);
@@ -1620,7 +1605,6 @@ TEST_CASE("LedgerTxn loadAllOffers", "[ledgertxn]")
         {
             VirtualClock clock;
             auto app = createTestApplication(clock, getTestConfig(0, mode));
-            app->start();
 
             LedgerTxn ltx1(app->getLedgerTxnRoot());
             ltx1.getDelta();
@@ -1850,7 +1834,7 @@ testBestOffer(
     {
         VirtualClock clock;
         auto app = createTestApplication(clock, getTestConfig(0, mode));
-        app->start();
+
         testAtRoot(*app);
     }
 
@@ -1861,7 +1845,7 @@ testBestOffer(
         auto cfg = getTestConfig(0, mode);
         cfg.ENTRY_CACHE_SIZE = 0;
         auto app = createTestApplication(clock, cfg);
-        app->start();
+
         testAtRoot(*app);
     }
 
@@ -1869,7 +1853,6 @@ testBestOffer(
     {
         VirtualClock clock;
         auto app = createTestApplication(clock, getTestConfig(0, mode));
-        app->start();
 
         testBestOffer(app->getLedgerTxnRoot(), buying, selling, expected,
                       updates.cbegin(), updates.cend());
@@ -1890,7 +1873,6 @@ TEST_CASE("LedgerTxn loadBestOffer", "[ledgertxn]")
         {
             VirtualClock clock;
             auto app = createTestApplication(clock, getTestConfig(0, mode));
-            app->start();
 
             LedgerTxn ltx1(app->getLedgerTxnRoot());
             LedgerTxn ltx2(ltx1);
@@ -1902,7 +1884,6 @@ TEST_CASE("LedgerTxn loadBestOffer", "[ledgertxn]")
         {
             VirtualClock clock;
             auto app = createTestApplication(clock, getTestConfig(0, mode));
-            app->start();
 
             LedgerTxn ltx1(app->getLedgerTxnRoot());
             ltx1.getDelta();
@@ -1914,7 +1895,6 @@ TEST_CASE("LedgerTxn loadBestOffer", "[ledgertxn]")
         {
             VirtualClock clock;
             auto app = createTestApplication(clock, getTestConfig(0, mode));
-            app->start();
 
             LedgerTxn ltx1(app->getLedgerTxnRoot());
             auto ltxe =
@@ -2072,7 +2052,7 @@ TEST_CASE("LedgerTxn loadBestOffer", "[ledgertxn]")
             // account from evicting a prefetched account), and 2000 trustlines
             cfg.ENTRY_CACHE_SIZE = 3003;
             auto app = createTestApplication(clock, cfg);
-            app->start();
+
             auto& root = app->getLedgerTxnRoot();
 
             LedgerEntry offer;
@@ -2235,7 +2215,7 @@ testOffersByAccountAndAsset(
     {
         VirtualClock clock;
         auto app = createTestApplication(clock, getTestConfig());
-        app->start();
+
         testAtRoot(*app);
     }
 
@@ -2246,7 +2226,7 @@ testOffersByAccountAndAsset(
         auto cfg = getTestConfig();
         cfg.ENTRY_CACHE_SIZE = 0;
         auto app = createTestApplication(clock, cfg);
-        app->start();
+
         testAtRoot(*app);
     }
 
@@ -2254,7 +2234,6 @@ testOffersByAccountAndAsset(
     {
         VirtualClock clock;
         auto app = createTestApplication(clock, getTestConfig());
-        app->start();
 
         testOffersByAccountAndAsset(app->getLedgerTxnRoot(), accountID, asset,
                                     expected, updates.cbegin(), updates.cend());
@@ -2277,7 +2256,6 @@ TEST_CASE("LedgerTxn loadOffersByAccountAndAsset", "[ledgertxn]")
     {
         VirtualClock clock;
         auto app = createTestApplication(clock, getTestConfig());
-        app->start();
 
         LedgerTxn ltx1(app->getLedgerTxnRoot());
         LedgerTxn ltx2(ltx1);
@@ -2289,7 +2267,6 @@ TEST_CASE("LedgerTxn loadOffersByAccountAndAsset", "[ledgertxn]")
     {
         VirtualClock clock;
         auto app = createTestApplication(clock, getTestConfig());
-        app->start();
 
         LedgerTxn ltx1(app->getLedgerTxnRoot());
         ltx1.getDelta();
@@ -2382,7 +2359,6 @@ TEST_CASE("LedgerTxn unsealHeader", "[ledgertxn]")
 {
     VirtualClock clock;
     auto app = createTestApplication(clock, getTestConfig());
-    app->start();
 
     auto doNothing = [](LedgerHeader&) {};
 
@@ -2418,7 +2394,6 @@ TEST_CASE("LedgerTxnEntry and LedgerTxnHeader move assignment", "[ledgertxn]")
 {
     VirtualClock clock;
     auto app = createTestApplication(clock, getTestConfig());
-    app->start();
 
     auto& root = app->getLedgerTxnRoot();
     auto lh = root.getHeader();
@@ -2516,7 +2491,7 @@ TEST_CASE("LedgerTxnRoot prefetch", "[ledgertxn]")
 
         UnorderedSet<LedgerKey> keysToPrefetch;
         auto app = createTestApplication(clock, cfg);
-        app->start();
+
         auto& root = app->getLedgerTxnRoot();
 
         auto entries = LedgerTestUtils::generateValidLedgerEntries(
@@ -2572,7 +2547,7 @@ TEST_CASE("Create performance benchmark", "[!hide][createbench]")
         VirtualClock clock;
         Config cfg(getTestConfig(0, mode));
         Application::pointer app = createTestApplication(clock, cfg);
-        app->start();
+
         size_t n = 0xffff, batch = 0xfff;
 
         std::vector<LedgerEntry> entries;
@@ -2636,7 +2611,7 @@ TEST_CASE("Erase performance benchmark", "[!hide][erasebench]")
         VirtualClock clock;
         Config cfg(getTestConfig(0, mode));
         Application::pointer app = createTestApplication(clock, cfg);
-        app->start();
+
         size_t n = 0xffff, batch = 0xfff;
 
         std::vector<LedgerEntry> entries;
@@ -2709,7 +2684,7 @@ TEST_CASE("Bulk load batch size benchmark", "[!hide][bulkbatchsizebench]")
             cfg.PREFETCH_BATCH_SIZE = floor;
 
             auto app = createTestApplication(clock, cfg);
-            app->start();
+
             auto& root = app->getLedgerTxnRoot();
 
             auto entries = LedgerTestUtils::generateValidLedgerEntries(50000);
@@ -2862,7 +2837,6 @@ TEST_CASE("Signers performance benchmark", "[!hide][signersbench]")
         Config cfg(getTestConfig(0, mode));
         cfg.ENTRY_CACHE_SIZE = 0;
         Application::pointer app = createTestApplication(clock, cfg);
-        app->start();
 
         CLOG_WARNING(Ledger, "Generating {} accounts with {} signers each",
                      numAccounts, numSigners);
@@ -3158,7 +3132,6 @@ TEST_CASE("LedgerTxn in memory order book", "[ledgertxn]")
     auto runTest = [&](Config::TestDbMode mode) {
         VirtualClock clock;
         auto app = createTestApplication(clock, getTestConfig(0, mode));
-        app->start();
 
         SECTION("one offer, one asset pair")
         {
@@ -3490,7 +3463,6 @@ TEST_CASE("LedgerTxn bulk-load offers", "[ledgertxn]")
     auto runTest = [&](Config::TestDbMode mode) {
         VirtualClock clock;
         auto app = createTestApplication(clock, getTestConfig(0, mode));
-        app->start();
 
         LedgerEntry le1;
         le1.data.type(OFFER);
@@ -3532,7 +3504,6 @@ TEST_CASE("Access deactivated entry", "[ledgertxn]")
     auto runTest = [&](Config::TestDbMode mode) {
         VirtualClock clock;
         auto app = createTestApplication(clock, getTestConfig(0, mode));
-        app->start();
 
         LedgerEntry le1;
         le1.data.type(DATA);
@@ -3669,7 +3640,6 @@ TEST_CASE("LedgerTxn generalized ledger entries", "[ledgertxn]")
 {
     VirtualClock clock;
     auto app = createTestApplication(clock, getTestConfig());
-    app->start();
 
     InternalLedgerEntry gle(InternalLedgerEntryType::SPONSORSHIP);
     gle.sponsorshipEntry().sponsoredID = autocheck::generator<AccountID>()(5);
@@ -3713,7 +3683,6 @@ TEST_CASE("LedgerTxn best offers cache eviction", "[ledgertxn]")
     VirtualClock clock;
     auto cfg = getTestConfig(0);
     auto app = createTestApplication(clock, cfg);
-    app->start();
 
     auto buying = autocheck::generator<Asset>()(UINT32_MAX);
     auto selling = autocheck::generator<Asset>()(UINT32_MAX);

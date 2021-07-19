@@ -18,6 +18,7 @@
 #include <map>
 #include <regex>
 #include <sodium.h>
+#include <stdexcept>
 
 using namespace stellar;
 
@@ -293,81 +294,23 @@ TEST_CASE("sign tests", "[crypto]")
     CHECK(!PubKeyUtils::verifySig(pk, sig, msg));
 }
 
-struct SignVerifyTestcase
-{
-    SecretKey key;
-    PublicKey pub;
-    std::vector<uint8_t> msg;
-    Signature sig;
-    void
-    sign()
-    {
-        sig = key.sign(msg);
-    }
-    void
-    verify()
-    {
-        CHECK(PubKeyUtils::verifySig(pub, sig, msg));
-    }
-    static SignVerifyTestcase
-    create()
-    {
-        SignVerifyTestcase st;
-        st.key = SecretKey::random();
-        st.pub = st.key.getPublicKey();
-        st.msg = randomBytes(256);
-        return st;
-    }
-};
-
 TEST_CASE("sign and verify benchmarking", "[crypto-bench][bench][!hide]")
 {
-    size_t n = 100000;
-    std::vector<SignVerifyTestcase> cases;
-    for (size_t i = 0; i < n; ++i)
-    {
-        cases.push_back(SignVerifyTestcase::create());
-    }
-
-    LOG_INFO(DEFAULT_LOG, "Benchmarking {} signatures and verifications", n);
-    {
-        for (auto& c : cases)
-        {
-            c.sign();
-        }
-    }
-
-    {
-        for (auto& c : cases)
-        {
-            c.verify();
-        }
-    }
+    size_t signPerSec = 0, verifyPerSec = 0;
+    LOG_INFO(DEFAULT_LOG, "Benchmarking signatures and verifications");
+    SecretKey::benchmarkOpsPerSecond(signPerSec, verifyPerSec, 10000);
+    LOG_INFO(DEFAULT_LOG, "Benchmarked {} signatures / sec", signPerSec);
+    LOG_INFO(DEFAULT_LOG, "Benchmarked {} verifications / sec", verifyPerSec);
 }
 
 TEST_CASE("verify-hit benchmarking", "[crypto-bench][bench][!hide]")
 {
-    size_t k = 10;
-    size_t n = 100000;
-    std::vector<SignVerifyTestcase> cases;
-    for (size_t i = 0; i < k; ++i)
-    {
-        cases.push_back(SignVerifyTestcase::create());
-    }
-
-    for (auto& c : cases)
-    {
-        c.sign();
-    }
-
-    LOG_INFO(DEFAULT_LOG, "Benchmarking {} verify-hits on {} signatures", n, k);
-    for (size_t i = 0; i < n; ++i)
-    {
-        for (auto& c : cases)
-        {
-            c.verify();
-        }
-    }
+    size_t signPerSec = 0, verifyPerSec = 0;
+    LOG_INFO(DEFAULT_LOG, "Benchmarking signatures and verify cache-hits");
+    SecretKey::benchmarkOpsPerSecond(signPerSec, verifyPerSec, 10000, 10);
+    LOG_INFO(DEFAULT_LOG, "Benchmarked {} signatures / sec", signPerSec);
+    LOG_INFO(DEFAULT_LOG, "Benchmarked {} verification cache-hits / sec",
+             verifyPerSec);
 }
 
 TEST_CASE("StrKey tests", "[crypto]")
@@ -394,7 +337,7 @@ TEST_CASE("StrKey tests", "[crypto]")
     uint8_t version = 2;
 
     // check round trip
-    for (int size = 0; size < 100; size++)
+    for (size_t size = 0; size < 100; size++)
     {
         std::vector<uint8_t> in(input(size));
 
@@ -501,7 +444,7 @@ TEST_CASE("StrKey tests", "[crypto]")
     // highly structured, so we give it some leeway.
     // To give us good odds of making it through integration tests
     // we set the threshold quite wide here, to 99.99%. The test is very
-    // slighly nondeterministic but this should give it plenty of leeway.
+    // slightly nondeterministic but this should give it plenty of leeway.
 
     double detectionRate =
         (((double)n_detected) / ((double)n_corrupted)) * 100.0;

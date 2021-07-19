@@ -22,12 +22,14 @@
 #include <fmt/chrono.h>
 #include <fmt/format.h>
 #include <functional>
+#include <numeric>
 #include <sstream>
+#include <type_traits>
 #include <unordered_set>
 
 namespace stellar
 {
-const uint32 Config::CURRENT_LEDGER_PROTOCOL_VERSION = 16
+const uint32 Config::CURRENT_LEDGER_PROTOCOL_VERSION = 17
 #ifdef ENABLE_NEXT_PROTOCOL_VERSION_UNSAFE_FOR_PRODUCTION
                                                        + 1
 #endif
@@ -43,7 +45,8 @@ static const std::unordered_set<std::string> TESTING_ONLY_OPTIONS = {
     "ARTIFICIALLY_ACCELERATE_TIME_FOR_TESTING",
     "ARTIFICIALLY_SET_CLOSE_TIME_FOR_TESTING",
     "ARTIFICIALLY_REPLAY_WITH_NEWEST_BUCKET_LOGIC_FOR_TESTING",
-    "OP_APPLY_SLEEP_TIME_FOR_TESTING"};
+    "OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING",
+    "OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING"};
 
 // Options that should only be used for testing
 static const std::unordered_set<std::string> TESTING_SUGGESTED_OPTIONS = {
@@ -98,19 +101,21 @@ Config::Config() : NODE_SEED(SecretKey::random())
     // non configurable
     MODE_ENABLES_BUCKETLIST = true;
     MODE_USES_IN_MEMORY_LEDGER = false;
-    MODE_STORES_HISTORY = true;
+    MODE_STORES_HISTORY_MISC = true;
+    MODE_STORES_HISTORY_LEDGERHEADERS = true;
     MODE_DOES_CATCHUP = true;
     MODE_AUTO_STARTS_OVERLAY = true;
-    MODE_KEEPS_BUCKETS = true;
-    OP_APPLY_SLEEP_TIME_FOR_TESTING = 0;
+    OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING =
+        std::vector<std::chrono::microseconds>();
+    OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING = std::vector<unsigned short>();
 
     FORCE_SCP = false;
     LEDGER_PROTOCOL_VERSION = CURRENT_LEDGER_PROTOCOL_VERSION;
 
     MAXIMUM_LEDGER_CLOSETIME_DRIFT = 50;
 
-    OVERLAY_PROTOCOL_MIN_VERSION = 15;
-    OVERLAY_PROTOCOL_VERSION = 16;
+    OVERLAY_PROTOCOL_MIN_VERSION = 16;
+    OVERLAY_PROTOCOL_VERSION = 17;
 
     VERSION_STR = STELLAR_CORE_VERSION;
 
@@ -119,6 +124,7 @@ Config::Config() : NODE_SEED(SecretKey::random())
     MANUAL_CLOSE = false;
     CATCHUP_COMPLETE = false;
     CATCHUP_RECENT = 0;
+    EXPERIMENTAL_PRECAUTION_DELAY_META = false;
     // automatic maintenance settings:
     // 11 minutes is relatively short and prime with 1 hour
     // which will cause automatic maintenance to rarely conflict with any other
@@ -129,6 +135,8 @@ Config::Config() : NODE_SEED(SecretKey::random())
     // (30*24*3600/5) / (700 - (11*60)/5 ) // number of periods
     //   * (11*60) / (24*3600) = 6.97 days
     AUTOMATIC_MAINTENANCE_COUNT = 700;
+    // automatic self-check happens once every 3 hours
+    AUTOMATIC_SELF_CHECK_PERIOD = std::chrono::seconds{3 * 60 * 60};
     ARTIFICIALLY_GENERATE_LOAD_FOR_TESTING = false;
     ARTIFICIALLY_ACCELERATE_TIME_FOR_TESTING = false;
     ARTIFICIALLY_SET_CLOSE_TIME_FOR_TESTING = 0;
@@ -143,9 +151,12 @@ Config::Config() : NODE_SEED(SecretKey::random())
     DISABLE_XDR_FSYNC = false;
     MAX_SLOTS_TO_REMEMBER = 12;
     METADATA_OUTPUT_STREAM = "";
+    METADATA_DEBUG_LEDGERS = 0;
 
     LOG_FILE_PATH = "stellar-core-{datetime:%Y-%m-%d_%H-%M-%S}.log";
     BUCKET_DIR_PATH = "buckets";
+
+    LOG_COLOR = false;
 
     TESTING_UPGRADE_DESIRED_FEE = LedgerManager::GENESIS_LEDGER_BASE_FEE;
     TESTING_UPGRADE_RESERVE = LedgerManager::GENESIS_LEDGER_BASE_RESERVE;
@@ -236,10 +247,11 @@ readString(ConfigItem const& item)
     return item.second->as<std::string>()->get();
 }
 
-std::vector<std::string>
-readStringArray(ConfigItem const& item)
+template <typename T>
+std::vector<T>
+readArray(ConfigItem const& item)
 {
-    auto result = std::vector<std::string>{};
+    auto result = std::vector<T>{};
     if (!item.second->is_array())
     {
         throw std::invalid_argument(
@@ -247,12 +259,12 @@ readStringArray(ConfigItem const& item)
     }
     for (auto v : item.second->as_array()->get())
     {
-        if (!v->as<std::string>())
+        if (!v->as<T>())
         {
             throw std::invalid_argument(
                 fmt::format("invalid element of '{}'", item.first));
         }
-        result.push_back(v->as<std::string>()->get());
+        result.push_back(v->as<T>()->get());
     }
     return result;
 }
@@ -267,9 +279,23 @@ readInt(ConfigItem const& item, T min = std::numeric_limits<T>::min(),
         throw std::invalid_argument(fmt::format("invalid '{}'", item.first));
     }
     int64_t v = item.second->as<int64_t>()->get();
-    if (v < min || v > max)
+    if (std::is_signed_v<T>)
+    {
+        if (v < min || v > max)
+        {
+            throw std::invalid_argument(fmt::format("bad '{}'", item.first));
+        }
+    }
+    else if (v < 0)
     {
         throw std::invalid_argument(fmt::format("bad '{}'", item.first));
+    }
+    else
+    {
+        if (static_cast<T>(v) < min || static_cast<T>(v) > max)
+        {
+            throw std::invalid_argument(fmt::format("bad '{}'", item.first));
+        }
     }
     return static_cast<T>(v);
 }
@@ -347,7 +373,7 @@ Config::loadQset(std::shared_ptr<cpptoml::table> group, SCPQuorumSet& qset,
         }
         else if (item.first == "VALIDATORS")
         {
-            auto values = readStringArray(item);
+            auto values = readArray<std::string>(item);
             for (auto v : values)
             {
                 PublicKey nodeID;
@@ -704,6 +730,39 @@ Config::verifyHistoryValidatorsBlocking(
     }
 }
 
+std::vector<std::chrono::microseconds>
+Config::processOpApplySleepTimeForTestingConfigs()
+{
+    if (OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING.size() !=
+        OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING.size())
+    {
+        throw std::invalid_argument(
+            "OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING and "
+            "OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING must be defined together "
+            "and have the same size");
+    }
+    if (std::accumulate(OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING.begin(),
+                        OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING.end(), 0) != 100)
+    {
+        throw std::invalid_argument(
+            "The sum of the weights in "
+            "OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING must equal 100");
+    }
+    std::vector<std::chrono::microseconds> ret;
+    ret.reserve(100);
+    for (size_t i = 0; i < OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING.size(); i++)
+    {
+        LOG_INFO(DEFAULT_LOG, "Sleeps for {} {}% of the time",
+                 OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING[i],
+                 OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING[i]);
+        for (size_t j = 0; j < OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING[i]; j++)
+        {
+            ret.push_back(OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING[i]);
+        }
+    }
+    return ret;
+}
+
 void
 Config::processConfig(std::shared_ptr<cpptoml::table> t)
 {
@@ -780,9 +839,17 @@ Config::processConfig(std::shared_ptr<cpptoml::table> t)
             {
                 METADATA_OUTPUT_STREAM = readString(item);
             }
+            else if (item.first == "EXPERIMENTAL_PRECAUTION_DELAY_META")
+            {
+                EXPERIMENTAL_PRECAUTION_DELAY_META = readBool(item);
+            }
+            else if (item.first == "METADATA_DEBUG_LEDGERS")
+            {
+                METADATA_DEBUG_LEDGERS = readInt<uint32_t>(item);
+            }
             else if (item.first == "KNOWN_CURSORS")
             {
-                KNOWN_CURSORS = readStringArray(item);
+                KNOWN_CURSORS = readArray<std::string>(item);
                 for (auto const& c : KNOWN_CURSORS)
                 {
                     if (!ExternalQueue::validateResourceID(c))
@@ -840,6 +907,11 @@ Config::processConfig(std::shared_ptr<cpptoml::table> t)
             {
                 AUTOMATIC_MAINTENANCE_COUNT = readInt<uint32_t>(item);
             }
+            else if (item.first == "AUTOMATIC_SELF_CHECK_PERIOD")
+            {
+                AUTOMATIC_SELF_CHECK_PERIOD =
+                    std::chrono::seconds{readInt<uint32_t>(item)};
+            }
             else if (item.first == "MANUAL_CLOSE")
             {
                 MANUAL_CLOSE = readBool(item);
@@ -864,7 +936,7 @@ Config::processConfig(std::shared_ptr<cpptoml::table> t)
             }
             else if (item.first == "NODE_NAMES")
             {
-                auto names = readStringArray(item);
+                auto names = readArray<std::string>(item);
                 for (auto v : names)
                 {
                     PublicKey nodeID;
@@ -936,7 +1008,7 @@ Config::processConfig(std::shared_ptr<cpptoml::table> t)
             }
             else if (item.first == "PREFERRED_PEERS")
             {
-                PREFERRED_PEERS = readStringArray(item);
+                PREFERRED_PEERS = readArray<std::string>(item);
             }
             else if (item.first == "PREFERRED_PEER_KEYS")
             {
@@ -948,7 +1020,7 @@ Config::processConfig(std::shared_ptr<cpptoml::table> t)
             }
             else if (item.first == "KNOWN_PEERS")
             {
-                auto peers = readStringArray(item);
+                auto peers = readArray<std::string>(item);
                 KNOWN_PEERS.insert(KNOWN_PEERS.begin(), peers.begin(),
                                    peers.end());
             }
@@ -958,7 +1030,7 @@ Config::processConfig(std::shared_ptr<cpptoml::table> t)
             }
             else if (item.first == "COMMANDS")
             {
-                COMMANDS = readStringArray(item);
+                COMMANDS = readArray<std::string>(item);
             }
             else if (item.first == "WORKER_THREADS")
             {
@@ -966,7 +1038,7 @@ Config::processConfig(std::shared_ptr<cpptoml::table> t)
             }
             else if (item.first == "MAX_CONCURRENT_SUBPROCESSES")
             {
-                MAX_CONCURRENT_SUBPROCESSES = readInt<int>(item, 1);
+                MAX_CONCURRENT_SUBPROCESSES = readInt<size_t>(item, 1);
             }
             else if (item.first == "MINIMUM_IDLE_PERCENT")
             {
@@ -1034,7 +1106,7 @@ Config::processConfig(std::shared_ptr<cpptoml::table> t)
             }
             else if (item.first == "INVARIANT_CHECKS")
             {
-                INVARIANT_CHECKS = readStringArray(item);
+                INVARIANT_CHECKS = readArray<std::string>(item);
             }
             else if (item.first == "ENTRY_CACHE_SIZE")
             {
@@ -1067,6 +1139,27 @@ Config::processConfig(std::shared_ptr<cpptoml::table> t)
                 EXCLUDE_TRANSACTIONS_CONTAINING_OPERATION_TYPE =
                     readXdrEnumArray<OperationType>(item);
             }
+            else if (item.first == "OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING")
+            {
+                auto input = readArray<int64_t>(item);
+                OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING.reserve(input.size());
+                // Convert int64_t to std::chrono::microseconds
+                std::transform(
+                    input.begin(), input.end(),
+                    std::back_inserter(
+                        OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING),
+                    [](int64_t x) { return std::chrono::microseconds(x); });
+            }
+            else if (item.first == "OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING")
+            {
+                auto input = readArray<int64_t>(item);
+                OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING.reserve(input.size());
+                // Convert int64_t to unsigned short
+                std::transform(
+                    input.begin(), input.end(),
+                    std::back_inserter(OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING),
+                    [](int64_t x) { return static_cast<unsigned short>(x); });
+            }
             else
             {
                 std::string err("Unknown configuration entry: '");
@@ -1074,6 +1167,13 @@ Config::processConfig(std::shared_ptr<cpptoml::table> t)
                 err += "'";
                 throw std::invalid_argument(err);
             }
+        }
+
+        if (!OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING.empty() ||
+            !OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING.empty())
+        {
+            mOpApplySleepTimeForTesting =
+                processOpApplySleepTimeForTestingConfigs();
         }
 
         gIsProductionNetwork = NETWORK_PASSPHRASE ==
@@ -1442,7 +1542,7 @@ Config::parseNodeIDsIntoSet(std::shared_ptr<cpptoml::table> t,
         auto nodes = t->get(configStr);
         if (nodes)
         {
-            auto values = readStringArray(ConfigItem{configStr, nodes});
+            auto values = readArray<std::string>(ConfigItem{configStr, nodes});
             for (auto const& v : values)
             {
                 PublicKey nodeID;
@@ -1547,6 +1647,40 @@ Config::getExpectedLedgerCloseTime() const
         return std::chrono::seconds{1};
     }
     return Herder::EXP_LEDGER_TIMESPAN_SECONDS;
+}
+
+void
+Config::setInMemoryMode()
+{
+    MODE_USES_IN_MEMORY_LEDGER = true;
+    DATABASE = SecretValue{"sqlite3://:memory:"};
+    MODE_STORES_HISTORY_MISC = false;
+    MODE_STORES_HISTORY_LEDGERHEADERS = false;
+    MODE_ENABLES_BUCKETLIST = true;
+}
+
+bool
+Config::isInMemoryMode() const
+{
+    return MODE_USES_IN_MEMORY_LEDGER;
+}
+
+bool
+Config::isInMemoryModeWithoutMinimalDB() const
+{
+    return MODE_USES_IN_MEMORY_LEDGER && !MODE_STORES_HISTORY_LEDGERHEADERS;
+}
+
+bool
+Config::modeStoresAllHistory() const
+{
+    return MODE_STORES_HISTORY_LEDGERHEADERS && MODE_STORES_HISTORY_MISC;
+}
+
+bool
+Config::modeStoresAnyHistory() const
+{
+    return MODE_STORES_HISTORY_LEDGERHEADERS || MODE_STORES_HISTORY_MISC;
 }
 
 void
@@ -1658,5 +1792,12 @@ Config::toString(SCPQuorumSet const& qset)
     return fw.write(json);
 }
 
+std::vector<std::chrono::microseconds> const&
+Config::getOpApplySleepTimeForTesting() const
+{
+    return mOpApplySleepTimeForTesting;
+}
+
 std::string const Config::STDIN_SPECIAL_NAME = "/dev/stdin";
+
 }

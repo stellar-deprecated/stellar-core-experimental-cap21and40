@@ -107,7 +107,17 @@ LedgerEntryIsValid::checkIsValid(LedgerEntry const& le,
     case DATA:
         return checkIsValid(le.data.data(), version);
     case CLAIMABLE_BALANCE:
-        return checkIsValid(le, previous, version);
+        if (le.ext.v() != 1 || !le.ext.v1().sponsoringID)
+        {
+            return "ClaimableBalance is not sponsored";
+        }
+        return checkIsValid(le.data.claimableBalance(), previous, version);
+    case LIQUIDITY_POOL:
+        if (le.ext.v() != 0)
+        {
+            return "LiquidityPool is sponsored";
+        }
+        return checkIsValid(le.data.liquidityPool(), version);
     default:
         return "LedgerEntry has invalid type";
     }
@@ -198,9 +208,15 @@ LedgerEntryIsValid::checkIsValid(TrustLineEntry const& tl,
     {
         return "TrustLine asset is native";
     }
-    if (!isAssetValid(tl.asset))
+    if (!isAssetValid(tl.asset, version))
     {
         return "TrustLine asset is invalid";
+    }
+    if (tl.asset.type() == ASSET_TYPE_POOL_SHARE && tl.ext.v() == 1 &&
+        (tl.ext.v1().liabilities.buying != 0 ||
+         tl.ext.v1().liabilities.selling != 0))
+    {
+        return "Pool share TrustLine has liabilities";
     }
     if (tl.balance < 0)
     {
@@ -234,11 +250,11 @@ LedgerEntryIsValid::checkIsValid(OfferEntry const& oe, uint32 version) const
     {
         return fmt::format("Offer offerID ({}) must be positive", oe.offerID);
     }
-    if (!isAssetValid(oe.selling))
+    if (!isAssetValid(oe.selling, version))
     {
         return "Offer selling asset is invalid";
     }
-    if (!isAssetValid(oe.buying))
+    if (!isAssetValid(oe.buying, version))
     {
         return "Offer buying asset is invalid";
     }
@@ -325,22 +341,16 @@ LedgerEntryIsValid::validatePredicate(ClaimPredicate const& pred,
 }
 
 std::string
-LedgerEntryIsValid::checkIsValid(LedgerEntry const& le,
+LedgerEntryIsValid::checkIsValid(ClaimableBalanceEntry const& cbe,
                                  LedgerEntry const* previous,
                                  uint32 version) const
 {
-    if (le.ext.v() != 1 || !le.ext.v1().sponsoringID)
-    {
-        return "ClaimableBalance is not sponsored";
-    }
-
-    auto const& cbe = le.data.claimableBalance();
     if (version < 17 && cbe.ext.v() == 1)
     {
         return "ClaimableBalance has v1 extension before protocol version 17";
     }
 
-    if (isClawbackEnabledOnClaimableBalance(le) &&
+    if (isClawbackEnabledOnClaimableBalance(cbe) &&
         cbe.asset.type() == ASSET_TYPE_NATIVE)
     {
         return "ClaimableBalance clawback set on native balance";
@@ -366,7 +376,7 @@ LedgerEntryIsValid::checkIsValid(LedgerEntry const& le,
     {
         return "ClaimableBalance claimants is empty";
     }
-    if (!isAssetValid(cbe.asset))
+    if (!isAssetValid(cbe.asset, version))
     {
         return "ClaimableBalance asset is invalid";
     }
@@ -383,6 +393,51 @@ LedgerEntryIsValid::checkIsValid(LedgerEntry const& le,
         }
     }
 
+    return {};
+}
+
+std::string
+LedgerEntryIsValid::checkIsValid(LiquidityPoolEntry const& lp,
+                                 uint32 version) const
+{
+    if (version < 18)
+    {
+        return "LiquidityPools are only valid from V18";
+    }
+    auto const cp = lp.body.constantProduct();
+    if (!isAssetValid(cp.params.assetA, version))
+    {
+        return "LiquidityPool assetA is invalid";
+    }
+    if (!isAssetValid(cp.params.assetB, version))
+    {
+        return "LiquidityPool assetB is invalid";
+    }
+    if (!(cp.params.assetA < cp.params.assetB))
+    {
+        return "LiquidityPool assets are in an invalid order";
+    }
+    if (cp.params.fee != 30)
+    {
+        return "LiquidityPool fee is not 30 basis points";
+    }
+
+    if (cp.reserveA < 0)
+    {
+        return "LiquidityPool reserveA is negative";
+    }
+    if (cp.reserveB < 0)
+    {
+        return "LiquidityPool reserveB is negative";
+    }
+    if (cp.totalPoolShares < 0)
+    {
+        return "LiquidityPool totalPoolShares is negative";
+    }
+    if (cp.poolSharesTrustLineCount < 0)
+    {
+        return "LiquidityPool poolSharesTrustLineCount is negative";
+    }
     return {};
 }
 }

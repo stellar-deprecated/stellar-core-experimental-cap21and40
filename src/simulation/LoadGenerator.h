@@ -101,14 +101,14 @@ class LoadGenerator
     medida::Meter& mLoadgenFail;
 
     bool mFailed{false};
-    int mWaitTillCompleteForLedgers{0};
+    uint32_t mWaitTillCompleteForLedgers{0};
 
     void reset();
     void createRootAccount();
     int64_t getTxPerStep(uint32_t txRate, std::chrono::seconds spikeInterval,
                          uint32_t spikeSize);
 
-    // Schedule a callback to generateLoad() STEP_MSECS miliseconds from now.
+    // Schedule a callback to generateLoad() STEP_MSECS milliseconds from now.
     void scheduleLoadGeneration(bool isCreate, uint32_t nAccounts,
                                 uint32_t offset, uint32_t nTxs, uint32_t txRate,
                                 uint32_t batchSize,

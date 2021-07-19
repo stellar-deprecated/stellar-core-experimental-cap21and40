@@ -96,7 +96,7 @@ AllowTrustOpFrame::doApply(AbstractLedgerTxn& ltx)
 
     LedgerKey key(TRUSTLINE);
     key.trustLine().accountID = mAllowTrust.trustor;
-    key.trustLine().asset = mAsset;
+    key.trustLine().asset = assetToTrustLineAsset(mAsset);
 
     bool shouldRemoveOffers = false;
     {
@@ -149,7 +149,7 @@ AllowTrustOpFrame::doCheckValid(uint32_t ledgerVersion)
         return false;
     }
 
-    if ((mAllowTrust.authorize & TRUSTLINE_CLAWBACK_ENABLED_FLAG) != 0)
+    if (mAllowTrust.authorize > AUTHORIZED_TO_MAINTAIN_LIABILITIES_FLAG)
     {
         innerResult().code(ALLOW_TRUST_MALFORMED);
         return false;
@@ -161,7 +161,7 @@ AllowTrustOpFrame::doCheckValid(uint32_t ledgerVersion)
         return false;
     }
 
-    if (!isAssetValid(mAsset))
+    if (!isAssetValid(mAsset, ledgerVersion))
     {
         innerResult().code(ALLOW_TRUST_MALFORMED);
         return false;

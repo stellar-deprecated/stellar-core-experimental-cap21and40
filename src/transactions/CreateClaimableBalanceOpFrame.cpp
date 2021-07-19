@@ -264,7 +264,7 @@ CreateClaimableBalanceOpFrame::doCheckValid(uint32_t ledgerVersion)
 {
     auto const& claimants = mCreateClaimableBalance.claimants;
 
-    if (!isAssetValid(mCreateClaimableBalance.asset) ||
+    if (!isAssetValid(mCreateClaimableBalance.asset, ledgerVersion) ||
         mCreateClaimableBalance.amount <= 0 || claimants.empty())
     {
         innerResult().code(CREATE_CLAIMABLE_BALANCE_MALFORMED);
@@ -312,7 +312,7 @@ CreateClaimableBalanceOpFrame::getBalanceID()
 {
     OperationID operationID;
     operationID.type(ENVELOPE_TYPE_OP_ID);
-    operationID.id().sourceAccount = toMuxedAccount(mParentTx.getSourceID());
+    operationID.id().sourceAccount = mParentTx.getSourceID();
     operationID.id().seqNum = mParentTx.getSeqNum();
     operationID.id().opNum = mOpIndex;
 

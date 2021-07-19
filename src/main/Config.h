@@ -101,6 +101,8 @@ class Config : public std::enable_shared_from_this<Config>
     void verifyHistoryValidatorsBlocking(
         std::vector<ValidatorEntry> const& validators);
 
+    std::vector<std::chrono::microseconds> mOpApplySleepTimeForTesting;
+
   public:
     static const uint32 CURRENT_LEDGER_PROTOCOL_VERSION;
 
@@ -154,6 +156,9 @@ class Config : public std::enable_shared_from_this<Config>
     // maintenance run
     uint32_t AUTOMATIC_MAINTENANCE_COUNT;
 
+    // Interval between automatic invocations of self-check.
+    std::chrono::seconds AUTOMATIC_SELF_CHECK_PERIOD;
+
     // A config parameter that enables synthetic load generation on demand,
     // using the `generateload` runtime command (see CommandHandler.cpp). This
     // option only exists for stress-testing and should not be enabled in
@@ -189,10 +194,14 @@ class Config : public std::enable_shared_from_this<Config>
     // system.
     bool ARTIFICIALLY_REPLAY_WITH_NEWEST_BUCKET_LOGIC_FOR_TESTING;
 
-    // A config parameter that forces transaction application during ledger
-    // close to sleep for a given number of microseconds. This option is only
-    // for consensus and overlay simulation testing.
-    uint32_t OP_APPLY_SLEEP_TIME_FOR_TESTING;
+    // Config parameters that force transaction application during ledger
+    // close to sleep for OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING[i]
+    // microseconds OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING[i]% of the time for
+    // each i. These options are only for consensus and overlay simulation
+    // testing. These two must be used together.
+    std::vector<std::chrono::microseconds>
+        OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING;
+    std::vector<unsigned short> OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING;
 
     // A config parameter that allows a node to generate buckets. This should
     // be set to `false` only for testing purposes.
@@ -204,9 +213,16 @@ class Config : public std::enable_shared_from_this<Config>
     // production validators.
     bool MODE_USES_IN_MEMORY_LEDGER;
 
+    // A config parameter that can be set to true (in a captive-core
+    // configuration) to delay emitting metadata by one ledger.
+    bool EXPERIMENTAL_PRECAUTION_DELAY_META;
+
     // A config parameter that stores historical data, such as transactions,
     // fees, and scp history in the database
-    bool MODE_STORES_HISTORY;
+    bool MODE_STORES_HISTORY_MISC;
+
+    // A config parameter that stores ledger headers in the database
+    bool MODE_STORES_HISTORY_LEDGERHEADERS;
 
     // A config parameter that controls whether core automatically catches up
     // when it has buffered enough input; if false an out-of-sync node will
@@ -218,10 +234,6 @@ class Config : public std::enable_shared_from_this<Config>
     // overlay on startup, or waits for a later startup after performing some
     // other pre-overlay-start operations (eg. offline catchup).
     bool MODE_AUTO_STARTS_OVERLAY;
-
-    // A config parameter that controls whether the application cleans
-    // up the bucket directory on exit. Usually used with the in-memory mode.
-    bool MODE_KEEPS_BUCKETS;
 
     // A config to allow connections to localhost
     // this should only be enabled when testing as it's a security issue
@@ -279,6 +291,13 @@ class Config : public std::enable_shared_from_this<Config>
     // in consensus, only a passive "watcher" node.
     std::string METADATA_OUTPUT_STREAM;
 
+    // Number of ledgers worth of transaction metadata to preserve on disk for
+    // debugging purposes. These records are automatically maintained and
+    // rotated during processing, and are helpful for recovery in case of a
+    // serious error; they should only be reduced or disabled if disk space is
+    // at a premium.
+    uint32_t METADATA_DEBUG_LEDGERS;
+
     // Set of cursors added at each startup with value '1'.
     std::vector<std::string> KNOWN_CURSORS;
 
@@ -319,8 +338,8 @@ class Config : public std::enable_shared_from_this<Config>
     int MAX_BATCH_WRITE_BYTES;
     double FLOOD_OP_RATE_PER_LEDGER;
     int FLOOD_TX_PERIOD_MS;
-    static constexpr auto const POSSIBLY_PREFERRED_EXTRA = 2;
-    static constexpr auto const REALLY_DEAD_NUM_FAILURES_CUTOFF = 120;
+    static constexpr size_t const POSSIBLY_PREFERRED_EXTRA = 2;
+    static constexpr size_t const REALLY_DEAD_NUM_FAILURES_CUTOFF = 120;
 
     // survey config
     std::set<PublicKey> SURVEYOR_KEYS;
@@ -347,7 +366,7 @@ class Config : public std::enable_shared_from_this<Config>
     int WORKER_THREADS;
 
     // process-management config
-    int MAX_CONCURRENT_SUBPROCESSES;
+    size_t MAX_CONCURRENT_SUBPROCESSES;
 
     // SCP config
     SecretKey NODE_SEED;
@@ -407,7 +426,7 @@ class Config : public std::enable_shared_from_this<Config>
     // fixes values of connection-relates settings
     void adjust();
 
-    std::string toShortString(PublicKey const& pk) const;
+    std::string toShortString(NodeID const& pk) const;
 
     // fullKey true => returns full StrKey corresponding to pk
     //  otherwise, returns alias or shortString equivalent
@@ -416,6 +435,12 @@ class Config : public std::enable_shared_from_this<Config>
     bool resolveNodeID(std::string const& s, PublicKey& retKey) const;
 
     std::chrono::seconds getExpectedLedgerCloseTime() const;
+
+    void setInMemoryMode();
+    bool isInMemoryMode() const;
+    bool isInMemoryModeWithoutMinimalDB() const;
+    bool modeStoresAllHistory() const;
+    bool modeStoresAnyHistory() const;
 
     void logBasicInfo();
     void setNoListen();
@@ -427,5 +452,11 @@ class Config : public std::enable_shared_from_this<Config>
     // A special name to be used for stdin in stead of a file name in command
     // line arguments.
     static std::string const STDIN_SPECIAL_NAME;
+
+    std::vector<std::chrono::microseconds> const&
+    getOpApplySleepTimeForTesting() const;
+
+    std::vector<std::chrono::microseconds>
+    processOpApplySleepTimeForTestingConfigs();
 };
 }

@@ -4,7 +4,6 @@
 
 #include "scp/SCP.h"
 #include "crypto/Hex.h"
-#include "crypto/SHA.h"
 #include "scp/LocalNode.h"
 #include "scp/Slot.h"
 #include "util/GlobalChecks.h"
@@ -24,7 +23,7 @@ SCP::SCP(SCPDriver& driver, NodeID const& nodeID, bool isValidator,
     : mDriver(driver)
 {
     mLocalNode =
-        std::make_shared<LocalNode>(nodeID, isValidator, qSetLocal, this);
+        std::make_shared<LocalNode>(nodeID, isValidator, qSetLocal, driver);
 }
 
 SCP::EnvelopeState

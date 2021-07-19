@@ -333,7 +333,7 @@ ManageOfferOpFrameBase::doApply(AbstractLedgerTxn& ltxOuter)
         }
 
         int64_t sheepSent, wheatReceived;
-        std::vector<ClaimOfferAtom> offerTrail;
+        std::vector<ClaimAtom> offerTrail;
         Price maxWheatPrice(mPrice.d, mPrice.n);
         ConvertResult r = convertWithOffers(
             ltx, mSheep, maxSheepSend, sheepSent, mWheat, maxWheatReceive,
@@ -556,7 +556,8 @@ ManageOfferOpFrameBase::buildOffer(int64_t amount, uint32_t flags,
 bool
 ManageOfferOpFrameBase::doCheckValid(uint32_t ledgerVersion)
 {
-    if (!isAssetValid(mSheep) || !isAssetValid(mWheat))
+    if (!isAssetValid(mSheep, ledgerVersion) ||
+        !isAssetValid(mWheat, ledgerVersion))
     {
         setResultMalformed();
         return false;

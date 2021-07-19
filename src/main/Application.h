@@ -43,6 +43,7 @@ class WorkScheduler;
 class BanManager;
 class StatusManager;
 class AbstractLedgerTxnParent;
+class BasicWork;
 
 #ifdef BUILD_TESTS
 class LoadGenerator;
@@ -162,7 +163,11 @@ class Application
 
     virtual ~Application(){};
 
-    virtual void initialize(bool createNewDB) = 0;
+    virtual void initialize(bool createNewDB, bool forceRebuild) = 0;
+
+    // reset the ledger state entirely
+    // (to be used before applying buckets)
+    virtual void resetLedgerState() = 0;
 
     // Return the time in seconds since the POSIX epoch, according to the
     // VirtualClock this Application is bound to. Convenience method.
@@ -279,27 +284,40 @@ class Application
     // Report information about the instance to standard logging
     virtual void reportInfo() = 0;
 
+    // Schedule background work to do some (basic, online) self-checks.
+    // Returns a WorkSequence that can be monitored for completion.
+    virtual std::shared_ptr<BasicWork>
+    scheduleSelfCheck(bool waitUntilNextCheckpoint) = 0;
+
     // Returns the hash of the passphrase, used to separate various network
     // instances
     virtual Hash const& getNetworkID() const = 0;
 
     virtual AbstractLedgerTxnParent& getLedgerTxnRoot() = 0;
 
+    virtual void validateAndLogConfig() = 0;
+
     // Factory: create a new Application object bound to `clock`, with a local
     // copy made of `cfg`
     static pointer create(VirtualClock& clock, Config const& cfg,
-                          bool newDB = true);
+                          bool newDB = true, bool forceRebuild = false);
     template <typename T, typename... Args>
     static std::shared_ptr<T>
     create(VirtualClock& clock, Config const& cfg, Args&&... args,
-           bool newDB = true)
+           bool newDB = true, bool forceRebuild = false)
     {
         auto ret = std::make_shared<T>(clock, cfg, std::forward<Args>(args)...);
-        ret->initialize(newDB);
+        ret->initialize(newDB, forceRebuild);
         validateNetworkPassphrase(ret);
+        ret->validateAndLogConfig();
 
         return ret;
     }
+
+    // This method is used in in-memory mode: when rebuilding state from buckets
+    // is not possible, this method resets the database state back to genesis
+    // (while preserving the overlay data).
+    virtual void resetDBForInMemoryMode() = 0;
 
   protected:
     Application()

@@ -120,7 +120,7 @@ LoadGenerator::reset()
     mFailed = false;
 }
 
-// Schedule a callback to generateLoad() STEP_MSECS miliseconds from now.
+// Schedule a callback to generateLoad() STEP_MSECS milliseconds from now.
 void
 LoadGenerator::scheduleLoadGeneration(bool isCreate, uint32_t nAccounts,
                                       uint32_t offset, uint32_t nTxs,
@@ -264,7 +264,7 @@ LoadGenerator::submitCreationTx(uint32_t nAccounts, uint32_t offset,
     TransactionResultCode code;
     TransactionQueue::AddResult status;
     bool createDuplicate = false;
-    int numTries = 0;
+    uint32_t numTries = 0;
 
     while ((status = tx.execute(mApp, true, code, batchSize)) !=
            TransactionQueue::AddResult::ADD_STATUS_PENDING)
@@ -307,7 +307,7 @@ LoadGenerator::submitPaymentTx(uint32_t nAccounts, uint32_t offset,
 
     TransactionResultCode code;
     TransactionQueue::AddResult status;
-    int numTries = 0;
+    uint32_t numTries = 0;
 
     while ((status = tx.execute(mApp, false, code, batchSize)) !=
            TransactionQueue::AddResult::ADD_STATUS_PENDING)
@@ -344,8 +344,8 @@ LoadGenerator::logProgress(std::chrono::nanoseconds submitTimer, bool isCreate,
     auto submitSteps = duration_cast<milliseconds>(submitTimer).count();
 
     auto remainingTxCount = isCreate ? nAccounts / batchSize : nTxs;
-    auto etaSecs =
-        (uint32_t)(((double)remainingTxCount) / applyTx.one_minute_rate());
+    auto etaSecs = (uint32_t)(((double)remainingTxCount) /
+                              max<double>(1, applyTx.one_minute_rate()));
 
     auto etaHours = etaSecs / 3600;
     auto etaMins = etaSecs % 60;

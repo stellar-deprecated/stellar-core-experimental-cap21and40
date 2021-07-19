@@ -20,6 +20,7 @@
 #include <fmt/format.h>
 #include <medida/meter.h>
 #include <medida/metrics_registry.h>
+#include <optional>
 
 namespace stellar
 {
@@ -239,8 +240,9 @@ ApplyCheckpointWork::getNextLedgerCloseData()
     }
 #endif
 
-    return std::make_shared<LedgerCloseData>(header.ledgerSeq, txset,
-                                             header.scpValue);
+    return std::make_shared<LedgerCloseData>(
+        header.ledgerSeq, txset, header.scpValue,
+        std::make_optional<Hash>(mHeaderHistoryEntry.hash));
 }
 
 BasicWork::State
@@ -304,8 +306,9 @@ ApplyCheckpointWork::onRun()
 
         auto applyLedger = std::make_shared<ApplyLedgerWork>(mApp, *lcd);
 
-        auto predicate = [&]() {
-            auto& bl = mApp.getBucketManager().getBucketList();
+        auto predicate = [](Application& app) {
+            auto& bl = app.getBucketManager().getBucketList();
+            auto& lm = app.getLedgerManager();
             bl.resolveAnyReadyFutures();
             return bl.futuresAllResolved(
                 bl.getMaxMergeLevel(lm.getLastClosedLedgerNum() + 1));

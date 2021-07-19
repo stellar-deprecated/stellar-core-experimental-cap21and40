@@ -7,6 +7,12 @@
 namespace stellar
 {
 
+union LiquidityPoolParameters switch (LiquidityPoolType type)
+{
+case LIQUIDITY_POOL_CONSTANT_PRODUCT:
+    LiquidityPoolConstantProductParameters constantProduct;
+};
+
 // Source or destination of a payment operation
 union MuxedAccount switch (CryptoKeyType type)
 {
@@ -212,6 +218,23 @@ struct SetOptionsOp
     Signer* signer;
 };
 
+union ChangeTrustAsset switch (AssetType type)
+{
+case ASSET_TYPE_NATIVE: // Not credit
+    void;
+
+case ASSET_TYPE_CREDIT_ALPHANUM4:
+    AlphaNum4 alphaNum4;
+
+case ASSET_TYPE_CREDIT_ALPHANUM12:
+    AlphaNum12 alphaNum12;
+
+case ASSET_TYPE_POOL_SHARE:
+    LiquidityPoolParameters liquidityPool;
+
+    // add other asset types here in the future
+};
+
 /* Creates, updates or deletes a trust line
 
     Threshold: med
@@ -221,7 +244,7 @@ struct SetOptionsOp
 */
 struct ChangeTrustOp
 {
-    Asset line;
+    ChangeTrustAsset line;
 
     // if limit is set to 0, deletes the trust line
     int64 limit;
@@ -409,6 +432,8 @@ struct SetTrustLineFlagsOp
     uint32 setFlags;   // which flags to set
 };
 
+const LIQUIDITY_POOL_FEE_V18 = 30;
+
 /* An operation is the lowest unit of work that a transaction does */
 struct Operation
 {
@@ -472,7 +497,7 @@ union OperationID switch (EnvelopeType type)
 case ENVELOPE_TYPE_OP_ID:
     struct
     {
-        MuxedAccount sourceAccount;
+        AccountID sourceAccount;
         SequenceNumber seqNum;
         uint32 opNum;
     } id;
@@ -681,7 +706,32 @@ struct TransactionSignaturePayload
 
 /* Operation Results section */
 
-/* This result is used when offers are taken during an operation */
+enum ClaimAtomType
+{
+    CLAIM_ATOM_TYPE_V0 = 0,
+    CLAIM_ATOM_TYPE_ORDER_BOOK = 1
+};
+
+// ClaimOfferAtomV0 is a ClaimOfferAtom with the AccountID discriminant stripped
+// off, leaving a raw ed25519 public key to identify the source account. This is
+// used for backwards compatibility starting from the protocol 17/18 boundary.
+// If an "old-style" ClaimOfferAtom is parsed with this XDR definition, it will
+// be parsed as a "new-style" ClaimAtom containing a ClaimOfferAtomV0.
+struct ClaimOfferAtomV0
+{
+    // emitted to identify the offer
+    uint256 sellerEd25519; // Account that owns the offer
+    int64 offerID;
+
+    // amount and asset taken from the owner
+    Asset assetSold;
+    int64 amountSold;
+
+    // amount and asset sent to the owner
+    Asset assetBought;
+    int64 amountBought;
+};
+
 struct ClaimOfferAtom
 {
     // emitted to identify the offer
@@ -695,6 +745,17 @@ struct ClaimOfferAtom
     // amount and asset sent to the owner
     Asset assetBought;
     int64 amountBought;
+};
+
+/* This result is used when offers are taken or liquidity is exchanged with a
+   liquidity pool during an operation
+*/
+union ClaimAtom switch (ClaimAtomType type)
+{
+case CLAIM_ATOM_TYPE_V0:
+    ClaimOfferAtomV0 v0;
+case CLAIM_ATOM_TYPE_ORDER_BOOK:
+    ClaimOfferAtom orderBook;
 };
 
 /******* CreateAccount Result ********/
@@ -725,7 +786,7 @@ default:
 enum PaymentResultCode
 {
     // codes considered as "success" for the operation
-    PAYMENT_SUCCESS = 0, // payment successfuly completed
+    PAYMENT_SUCCESS = 0, // payment successfully completed
 
     // codes considered as "failure" for the operation
     PAYMENT_MALFORMED = -1,          // bad input
@@ -791,7 +852,7 @@ union PathPaymentStrictReceiveResult switch (
 case PATH_PAYMENT_STRICT_RECEIVE_SUCCESS:
     struct
     {
-        ClaimOfferAtom offers<>;
+        ClaimAtom offers<>;
         SimplePaymentResult last;
     } success;
 case PATH_PAYMENT_STRICT_RECEIVE_NO_ISSUER:
@@ -835,7 +896,7 @@ union PathPaymentStrictSendResult switch (PathPaymentStrictSendResultCode code)
 case PATH_PAYMENT_STRICT_SEND_SUCCESS:
     struct
     {
-        ClaimOfferAtom offers<>;
+        ClaimAtom offers<>;
         SimplePaymentResult last;
     } success;
 case PATH_PAYMENT_STRICT_SEND_NO_ISSUER:
@@ -883,7 +944,7 @@ enum ManageOfferEffect
 struct ManageOfferSuccessResult
 {
     // offers that got claimed while creating this offer
-    ClaimOfferAtom offersClaimed<>;
+    ClaimAtom offersClaimed<>;
 
     union switch (ManageOfferEffect effect)
     {
@@ -979,7 +1040,10 @@ enum ChangeTrustResultCode
                                      // cannot create with a limit of 0
     CHANGE_TRUST_LOW_RESERVE =
         -4, // not enough funds to create a new trust line,
-    CHANGE_TRUST_SELF_NOT_ALLOWED = -5 // trusting self is not allowed
+    CHANGE_TRUST_SELF_NOT_ALLOWED = -5, // trusting self is not allowed
+    CHANGE_TRUST_TRUST_LINE_MISSING = -6, // Asset trustline is missing for pool
+    CHANGE_TRUST_CANNOT_DELETE = 7, // Asset trustline is still referenced in a pool
+    CHANGE_TRUST_NOT_AUTH_MAINTAIN_LIABILITIES = 8 // Asset trustline is deauthorized
 };
 
 union ChangeTrustResult switch (ChangeTrustResultCode code)
@@ -1033,7 +1097,7 @@ enum AccountMergeResultCode
 union AccountMergeResult switch (AccountMergeResultCode code)
 {
 case ACCOUNT_MERGE_SUCCESS:
-    int64 sourceAccountBalance; // how much got transfered from source account
+    int64 sourceAccountBalance; // how much got transferred from source account
 default:
     void;
 };
@@ -1198,7 +1262,8 @@ enum RevokeSponsorshipResultCode
     REVOKE_SPONSORSHIP_DOES_NOT_EXIST = -1,
     REVOKE_SPONSORSHIP_NOT_SPONSOR = -2,
     REVOKE_SPONSORSHIP_LOW_RESERVE = -3,
-    REVOKE_SPONSORSHIP_ONLY_TRANSFERABLE = -4
+    REVOKE_SPONSORSHIP_ONLY_TRANSFERABLE = -4,
+    REVOKE_SPONSORSHIP_MALFORMED = -5
 };
 
 union RevokeSponsorshipResult switch (RevokeSponsorshipResultCode code)
@@ -1360,7 +1425,7 @@ enum TransactionResultCode
     txNO_ACCOUNT = -8,           // source account not found
     txINSUFFICIENT_FEE = -9,     // fee is too small
     txBAD_AUTH_EXTRA = -10,      // unused signatures attached to transaction
-    txINTERNAL_ERROR = -11,      // an unknown error occured
+    txINTERNAL_ERROR = -11,      // an unknown error occurred
 
     txNOT_SUPPORTED = -12,         // transaction type not supported
     txFEE_BUMP_INNER_FAILED = -13, // fee bump inner transaction failed

@@ -183,6 +183,12 @@ TestAccount::changeTrust(Asset const& asset, int64_t limit)
 }
 
 void
+TestAccount::changeTrust(ChangeTrustAsset const& asset, int64_t limit)
+{
+    applyTx(tx({txtest::changeTrust(asset, limit)}), mApp);
+}
+
+void
 TestAccount::allowTrust(Asset const& asset, PublicKey const& trustor,
                         uint32_t flag)
 {
@@ -267,7 +273,7 @@ TestAccount::loadTrustLine(Asset const& asset) const
     LedgerTxn ltx(mApp.getLedgerTxnRoot());
     LedgerKey key(TRUSTLINE);
     key.trustLine().accountID = getPublicKey();
-    key.trustLine().asset = asset;
+    key.trustLine().asset = assetToTrustLineAsset(asset);
     return ltx.load(key).current().data.trustLine();
 }
 
@@ -277,7 +283,7 @@ TestAccount::hasTrustLine(Asset const& asset) const
     LedgerTxn ltx(mApp.getLedgerTxnRoot());
     LedgerKey key(TRUSTLINE);
     key.trustLine().accountID = getPublicKey();
-    key.trustLine().asset = asset;
+    key.trustLine().asset = assetToTrustLineAsset(asset);
     return (bool)ltx.load(key);
 }
 
@@ -362,7 +368,7 @@ TestAccount::getBalanceID(uint32_t opIndex, SequenceNumber sn)
 
     OperationID operationID;
     operationID.type(ENVELOPE_TYPE_OP_ID);
-    operationID.id().sourceAccount = toMuxedAccount(getPublicKey());
+    operationID.id().sourceAccount = getPublicKey();
     operationID.id().seqNum = sn;
     operationID.id().opNum = opIndex;
 

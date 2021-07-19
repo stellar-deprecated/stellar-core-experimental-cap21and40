@@ -103,7 +103,7 @@ struct HistoryArchiveState
         {
             ar(CEREAL_NVP(networkPassphrase));
         }
-        catch (cereal::Exception)
+        catch (cereal::Exception&)
         {
             // networkPassphrase wasn't parsed.
             // This is expected when the input file does not contain it.
@@ -166,15 +166,7 @@ class HistoryArchive : public std::enable_shared_from_this<HistoryArchive>
                            std::string const& remote) const;
     std::string mkdirCmd(std::string const& remoteDir) const;
 
-    void markSuccess();
-    void markFailure();
-
-    uint64_t getSuccessCount() const;
-    uint64_t getFailureCount() const;
-
   private:
     HistoryArchiveConfiguration mConfig;
-    medida::Meter& mSuccessMeter;
-    medida::Meter& mFailureMeter;
 };
 }
