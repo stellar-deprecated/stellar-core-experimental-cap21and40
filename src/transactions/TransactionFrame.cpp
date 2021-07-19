@@ -473,6 +473,7 @@ TransactionFrame::isTooEarlyForAccount(AbstractLedgerTxn& ltx,
     return false;
 }
 
+bool
 TransactionFrame::commonValidPreSourceAccountLoad(
     LedgerTxnHeader const& header, bool chargeFee,
     uint64_t lowerBoundCloseTimeOffset, uint64_t upperBoundCloseTimeOffset)
