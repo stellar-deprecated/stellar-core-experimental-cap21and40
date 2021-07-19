@@ -428,7 +428,7 @@ TransactionFrame::isTooEarlyForAccount(AbstractLedgerTxn& ltx,
     // This function validates whether it is too early for this transaction to
     // be processed according to the account.
 
-    if (header.current().ledgerVersion < 16)
+    if (header.current().ledgerVersion < 18)
     {
         return false;
     }
@@ -535,7 +535,7 @@ TransactionFrame::processSeqNum(AbstractLedgerTxn& ltx)
         }
         acc.seqNum = getSeqNum();
 
-        if (header.current().ledgerVersion >= 16)
+        if (header.current().ledgerVersion >= 18)
         {
             if (!hasAccountEntryExtV3(acc))
             {

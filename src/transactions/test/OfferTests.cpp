@@ -3475,7 +3475,7 @@ TEST_CASE("create offer", "[tx][offers]")
                     checkSponsorship(ltx, a1, 0, nullptr, 2, 2, 0, 0);
                     checkSponsorship(ltx, a2, 0, nullptr, 2, 2, 0, 0);
                     int bExt = 0;
-                    if (isSponsored || ltx.getHeader().ledgerVersion >= 16)
+                    if (isSponsored || ltx.getHeader().ledgerVersion >= 18)
                     {
                         bExt = 2;
                     }

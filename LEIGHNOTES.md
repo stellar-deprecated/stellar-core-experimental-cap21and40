@@ -36,9 +36,9 @@ src/stellar-core new-db
 
 src/stellar-core run
 
-### Upgrade to protocol 16
+### Upgrade to protocol 18
 
-curl 'http://localhost:11626/upgrades?mode=set&upgradetime=1970-01-01T00:00:00Z&protocolversion=16'
+curl 'http://localhost:11626/upgrades?mode=set&upgradetime=1970-01-01T00:00:00Z&protocolversion=18'
 
 ### Submit tx
 

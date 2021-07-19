@@ -282,7 +282,7 @@ applyCheck(TransactionFramePtr tx, Application& app, bool checkSeqNum)
                             srcAccountBefore.seqNum);
                     REQUIRE(srcAccountAfter.current().data.account().seqNum ==
                             tx->getSeqNum());
-                    if (ledgerVersion >= 16)
+                    if (ledgerVersion >= 18)
                     {
                         REQUIRE(srcAccountAfter.current()
                                     .data.account()
