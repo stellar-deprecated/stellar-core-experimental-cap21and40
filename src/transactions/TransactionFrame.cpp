@@ -421,7 +421,7 @@ TransactionFrame::isTooLate(LedgerTxnHeader const& header,
 }
 
 bool
-TransactionFrame::isTooEarlyForAccount(AbstractLedgerTxn& ltx,
+TransactionFrame::isTooEarlyForAccount(AccountEntry sourceAccount,
                                        LedgerTxnHeader const& header,
                                        uint64_t lowerBoundCloseTimeOffset)
 {
@@ -433,20 +433,18 @@ TransactionFrame::isTooEarlyForAccount(AbstractLedgerTxn& ltx,
         return false;
     }
 
-    auto sourceAccount = loadSourceAccount(ltx, header);
-
     // TODO: If an account doesn't have a seqTime and seqLedger because the
     // account has not processed a seqNum since v3 extensions were rolled out,
     // should a minSeqAge and minSeqLedgerGap always be valid, or always be
     // invalid? This assumes it should always be valid, but that might not be
     // the most appropriate assumption to make.
-    if (!hasAccountEntryExtV3(sourceAccount.current().data.account()))
+    if (!hasAccountEntryExtV3(sourceAccount))
     {
         return false;
     }
 
     auto extV3 =
-        getAccountEntryExtensionV3(sourceAccount.current().data.account());
+        getAccountEntryExtensionV3(sourceAccount);
 
     auto minSeqAge = getMinSeqAge();
     auto closeTime = header.current().scpValue.closeTime;
@@ -677,7 +675,7 @@ TransactionFrame::commonValid(SignatureChecker& signatureChecker,
     // thing I like about putting it here though is that this check much occur
     // prior to sequence number update and must circumvent it, so from a
     // conceptual point-of-view it seems to belong here.
-    if (isTooEarlyForAccount(ltx, header, lowerBoundCloseTimeOffset))
+    if (isTooEarlyForAccount(sourceAccount.current().data.account(), header, lowerBoundCloseTimeOffset))
     {
         getResult().result.code(txTOO_EARLY);
         return res;

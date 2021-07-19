@@ -70,7 +70,7 @@ class TransactionFrame : public TransactionFrameBase
                             uint64_t lowerBoundCloseTimeOffset) const;
     virtual bool isTooLate(LedgerTxnHeader const& header,
                            uint64_t upperBoundCloseTimeOffset) const;
-    virtual bool isTooEarlyForAccount(AbstractLedgerTxn& ltx,
+    virtual bool isTooEarlyForAccount(AccountEntry sourceAccount,
                                       LedgerTxnHeader const& header,
                                       uint64_t lowerBoundCloseTimeOffset);
 
