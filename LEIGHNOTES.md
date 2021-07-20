@@ -10,23 +10,14 @@ NOTE: The account minimum reserve is 20XLM.
 
 ## Useful commands
 
-### First compile
+### Configure
 
 ./autogen.sh
-./configure --enable-next-protocol-version-unsafe-for-production
+./configure --disable-tests --enable-next-protocol-version-unsafe-for-production
+
+### Compile
+
 time (make -j24)
-
-### Run all the tests in parallel
-
-rm -fr /tmp/pgtmp.* ; time (make check -j24 ALL_VERSIONS=1 NUM_PARTITIONS=24 BATCHSIZE=15)
-
-### Run all the tests in parallel
-
-rm -fr /tmp/pgtmp.* ; time (make check -j24 ALL_VERSIONS=1 NUM_PARTITIONS=24 BATCHSIZE=15 TEST_SPEC='txenvelope')
-
-### Run a single test case or tests in serial
-
-rm -fr /tmp/pgtmp.* ; time (make -j24) && time (src/stellar-core test 'txenvelope')
 
 ### Setup DB
 
@@ -46,8 +37,8 @@ curl -G localhost:11626/tx --data-urlencode "blob=$(stc -c <stc-tx-file>)"
 
 ### Helpful queries for monitoring
 
-\watch 5 "select accountid,balance,seqnum,numsubentries from accounts order by lastmodified;"
+select accountid,balance,seqnum,numsubentries from accounts order by lastmodified;
 
-\watch 5 "select txid,ledgerseq,txresult from txhistory;"
+select txid,ledgerseq,txresult from txhistory;
 
-\watch 5 "select * from claimablebalance";
+select * from claimablebalance;
