@@ -443,8 +443,7 @@ TransactionFrame::isTooEarlyForAccount(AccountEntry sourceAccount,
         return false;
     }
 
-    auto extV3 =
-        getAccountEntryExtensionV3(sourceAccount);
+    auto extV3 = getAccountEntryExtensionV3(sourceAccount);
 
     auto minSeqAge = getMinSeqAge();
     auto closeTime = header.current().scpValue.closeTime;
@@ -675,7 +674,8 @@ TransactionFrame::commonValid(SignatureChecker& signatureChecker,
     // thing I like about putting it here though is that this check much occur
     // prior to sequence number update and must circumvent it, so from a
     // conceptual point-of-view it seems to belong here.
-    if (isTooEarlyForAccount(sourceAccount.current().data.account(), header, lowerBoundCloseTimeOffset))
+    if (isTooEarlyForAccount(sourceAccount.current().data.account(), header,
+                             lowerBoundCloseTimeOffset))
     {
         getResult().result.code(txTOO_EARLY);
         return res;
