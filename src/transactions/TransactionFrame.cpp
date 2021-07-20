@@ -260,6 +260,20 @@ TransactionFrame::getMinSeqLedgerGap() const
     return 0;
 }
 
+xdr::xvector<SignerKey, 2U>
+TransactionFrame::getExtraSigners() const
+{
+    if (mEnvelope.type() == ENVELOPE_TYPE_TX)
+    {
+        auto& cond = mEnvelope.v1().tx.cond;
+        if (cond.type() == PRECOND_GENERAL)
+        {
+            return cond.general().extraSigners;
+        }
+    }
+    return xdr::xvector<SignerKey, 2U>();
+}
+
 void
 TransactionFrame::addSignature(SecretKey const& secretKey)
 {
@@ -299,6 +313,16 @@ TransactionFrame::checkSignatureNoAccount(SignatureChecker& signatureChecker,
     ZoneScoped;
     std::vector<Signer> signers;
     auto signerKey = KeyUtils::convertKey<SignerKey>(accountID);
+    signers.push_back(Signer(signerKey, 1));
+    return signatureChecker.checkSignature(signers, 0);
+}
+
+bool
+TransactionFrame::checkSignatureExtraSigner(SignatureChecker& signatureChecker,
+                                            SignerKey signerKey)
+{
+    ZoneScoped;
+    std::vector<Signer> signers;
     signers.push_back(Signer(signerKey, 1));
     return signatureChecker.checkSignature(signers, 0);
 }
@@ -472,8 +496,9 @@ TransactionFrame::isTooEarlyForAccount(AccountEntry sourceAccount,
 
 bool
 TransactionFrame::commonValidPreSourceAccountLoad(
-    LedgerTxnHeader const& header, bool chargeFee,
-    uint64_t lowerBoundCloseTimeOffset, uint64_t upperBoundCloseTimeOffset)
+    SignatureChecker& signatureChecker, LedgerTxnHeader const& header,
+    bool chargeFee, uint64_t lowerBoundCloseTimeOffset,
+    uint64_t upperBoundCloseTimeOffset)
 {
     ZoneScoped;
     // this function does validations that are independent of the account state
@@ -513,6 +538,15 @@ TransactionFrame::commonValidPreSourceAccountLoad(
     {
         getResult().result.code(txINSUFFICIENT_FEE);
         return false;
+    }
+    auto extraSigners = getExtraSigners();
+    for (size_t i = 0; i < extraSigners.size(); i++)
+    {
+        if (!checkSignatureExtraSigner(signatureChecker, extraSigners[i]))
+        {
+            getResult().result.code(txBAD_AUTH);
+            return false;
+        }
     }
     return true;
 }
@@ -645,7 +679,7 @@ TransactionFrame::commonValid(SignatureChecker& signatureChecker,
 
     auto header = ltx.loadHeader();
 
-    if (!commonValidPreSourceAccountLoad(header, chargeFee,
+    if (!commonValidPreSourceAccountLoad(signatureChecker, header, chargeFee,
                                          lowerBoundCloseTimeOffset,
                                          upperBoundCloseTimeOffset))
     {

@@ -74,7 +74,8 @@ class TransactionFrame : public TransactionFrameBase
                                       LedgerTxnHeader const& header,
                                       uint64_t lowerBoundCloseTimeOffset);
 
-    bool commonValidPreSourceAccountLoad(LedgerTxnHeader const& header,
+    bool commonValidPreSourceAccountLoad(SignatureChecker& signatureChecker,
+                                         LedgerTxnHeader const& header,
                                          bool chargeFee,
                                          uint64_t lowerBoundCloseTimeOffset,
                                          uint64_t upperBoundCloseTimeOffset);
@@ -179,6 +180,7 @@ class TransactionFrame : public TransactionFrameBase
     const xdr::pointer<SequenceNumber> getMinSeqNum() const;
     Duration getMinSeqAge() const;
     uint32_t getMinSeqLedgerGap() const;
+    xdr::xvector<SignerKey, 2U> getExtraSigners() const;
     const xdr::pointer<TimeBounds> getTimeBounds() const;
 
     void addSignature(SecretKey const& secretKey);
@@ -189,6 +191,9 @@ class TransactionFrame : public TransactionFrameBase
 
     bool checkSignatureNoAccount(SignatureChecker& signatureChecker,
                                  AccountID const& accountID);
+
+    bool checkSignatureExtraSigner(SignatureChecker& signatureChecker,
+                                   SignerKey signerKey);
 
     bool checkValid(AbstractLedgerTxn& ltxOuter, SequenceNumber current,
                     bool chargeFee, uint64_t lowerBoundCloseTimeOffset,
