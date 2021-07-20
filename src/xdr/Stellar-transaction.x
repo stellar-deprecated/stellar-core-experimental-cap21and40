@@ -561,6 +561,12 @@ struct GeneralPreconditions {
     // must be at least minSeqLedgerGap greater than sourceAccount's
     // seqLedger.
     uint32 minSeqLedgerGap;
+
+    // For the transaction to be valid, there must be a signature
+    // corresponding to every Signer in this array, even if the
+    // signature is not otherwise required by the sourceAccount or
+    // operations.
+    SignerKey extraSigners<2>;
 };
 
 enum PreconditionType {
