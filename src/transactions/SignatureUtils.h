@@ -26,6 +26,9 @@ bool verify(DecoratedSignature const& sig, PublicKey const& signerKey,
 DecoratedSignature signHashX(const ByteSlice& x);
 bool verifyHashX(DecoratedSignature const& sig, SignerKey const& signerKey);
 
+bool verifySignedPayload(DecoratedSignature const& sig,
+                         SignerKey const& signerKey);
+
 SignatureHint getHint(ByteSlice const& bs);
 bool doesHintMatch(ByteSlice const& bs, SignatureHint const& hint);
 }

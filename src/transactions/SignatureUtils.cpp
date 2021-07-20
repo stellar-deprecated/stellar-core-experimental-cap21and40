@@ -74,6 +74,22 @@ verifyHashX(DecoratedSignature const& sig, SignerKey const& signerKey)
     return signerKey.hashX() == sha256(sig.signature);
 }
 
+bool
+verifySignedPayload(DecoratedSignature const& sig, SignerKey const& signerKey)
+{
+    ZoneScoped;
+
+    PublicKey pubKey;
+    pubKey.ed25519() = signerKey.ed25519SignedPayload().ed25519;
+
+    if (!doesHintMatch(pubKey.ed25519(), sig.hint))
+        return false;
+
+    auto payload = signerKey.ed25519SignedPayload().payload;
+
+    return PubKeyUtils::verifySig(pubKey, sig.signature, payload);
+}
+
 SignatureHint
 getHint(ByteSlice const& bs)
 {
