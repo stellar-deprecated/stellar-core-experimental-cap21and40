@@ -473,11 +473,6 @@ TransactionFrame::isTooEarlyForAccount(AccountEntry sourceAccount,
     auto closeTime = header.current().scpValue.closeTime;
     if ((extV3.seqTime + minSeqAge) > (closeTime + lowerBoundCloseTimeOffset))
     {
-        std::cout << "LEIGH: closeTime: " << closeTime << "\n";
-        std::cout << "LEIGH: lowerBoundCloseTimeOffset: "
-                  << lowerBoundCloseTimeOffset << "\n";
-        std::cout << "LEIGH: extV3.seqTime: " << extV3.seqTime << "\n";
-        std::cout << "LEIGH: tx.minSeqAge: " << minSeqAge << "\n";
         return true;
     }
 
@@ -485,9 +480,6 @@ TransactionFrame::isTooEarlyForAccount(AccountEntry sourceAccount,
     auto ledgerSeq = header.current().ledgerSeq;
     if ((extV3.seqLedger + minSeqLedgerGap) > ledgerSeq)
     {
-        std::cout << "LEIGH: ledgerSeq: " << ledgerSeq << "\n";
-        std::cout << "LEIGH: tx.minSeqLedgerGap: " << minSeqLedgerGap << "\n";
-        std::cout << "LEIGH: extV3.seqLedger: " << extV3.seqLedger << "\n";
         return true;
     }
 
