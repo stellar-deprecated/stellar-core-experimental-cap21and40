@@ -1620,33 +1620,6 @@ TEST_CASE("txenvelope", "[tx][envelope]")
                         REQUIRE(txFrame->getResultCode() == txTOO_LATE);
                     }
 
-                    SECTION("precond none")
-                    {
-                        txFrame = root.tx(
-                            {payment(a1.getPublicKey(), paymentAmount)});
-                        txFrame->getEnvelope().v1().tx.cond.type(PRECOND_NONE);
-                        getSignatures(txFrame).clear();
-                        txFrame->addSignature(root);
-
-                        closeLedgerOn(*app, 3, start + 1);
-                        applyCheck(txFrame, *app);
-                        REQUIRE(txFrame->getResultCode() == txSUCCESS);
-                    }
-
-                    SECTION("precond general")
-                    {
-                        txFrame = root.tx(
-                            {payment(a1.getPublicKey(), paymentAmount)});
-                        txFrame->getEnvelope().v1().tx.cond.type(
-                            PRECOND_GENERAL);
-                        getSignatures(txFrame).clear();
-                        txFrame->addSignature(root);
-
-                        closeLedgerOn(*app, 3, start + 1);
-                        applyCheck(txFrame, *app);
-                        REQUIRE(txFrame->getResultCode() == txSUCCESS);
-                    }
-
                     SECTION("lower bound offset")
                     {
                         txFrame = root.tx(
@@ -1779,49 +1752,6 @@ TEST_CASE("txenvelope", "[tx][envelope]")
                         {
                             offsetTest(false);
                         }
-                    }
-                });
-            }
-
-            SECTION("general preconditions")
-            {
-                for_versions_from(16, *app, [&] {
-                    SECTION("empty")
-                    {
-                        setup();
-                        txFrame = root.tx(
-                            {payment(a1.getPublicKey(), paymentAmount)});
-
-                        GeneralPreconditions general;
-                        setGeneralPrecond(txFrame, general);
-
-                        getSignatures(txFrame).clear();
-                        txFrame->addSignature(root);
-
-                        applyCheck(txFrame, *app);
-
-                        REQUIRE(txFrame->getResultCode() == txSUCCESS);
-                    }
-
-                    SECTION("minSeqNum")
-                    {
-                        setup();
-                        auto accountSeqNum = root.getLastSequenceNumber();
-                        auto txSeqNum = accountSeqNum + 10;
-                        txFrame =
-                            root.tx({payment(a1.getPublicKey(), paymentAmount)},
-                                    txSeqNum);
-
-                        GeneralPreconditions general;
-                        general.minSeqNum.activate() = accountSeqNum;
-                        setGeneralPrecond(txFrame, general);
-
-                        getSignatures(txFrame).clear();
-                        txFrame->addSignature(root);
-
-                        applyCheck(txFrame, *app);
-
-                        REQUIRE(txFrame->getResultCode() == txSUCCESS);
                     }
                 });
             }

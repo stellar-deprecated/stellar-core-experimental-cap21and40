@@ -4520,9 +4520,7 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                     checkSponsorship(ltx, a1, 0, nullptr, 4, 2, 0, 2);
                     checkSponsorship(ltx, a2, 0, nullptr, 3, 2, 0, 1);
                     checkSponsorship(ltx, b, 0, nullptr, 2, 2, 3, 0);
-                    checkSponsorship(ltx, c, 0, nullptr, 2,
-                                     ltx.getHeader().ledgerVersion < 16 ? 0 : 2,
-                                     0, 0);
+                    checkSponsorship(ltx, c, 0, nullptr, 2, 0, 0, 0);
                 }
 
                 SECTION("cross one offer fully")
@@ -4539,9 +4537,7 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                     checkSponsorship(ltx, a1, 0, nullptr, 3, 2, 0, 1);
                     checkSponsorship(ltx, a2, 0, nullptr, 3, 2, 0, 1);
                     checkSponsorship(ltx, b, 0, nullptr, 2, 2, 2, 0);
-                    checkSponsorship(ltx, c, 0, nullptr, 2,
-                                     ltx.getHeader().ledgerVersion < 16 ? 0 : 2,
-                                     0, 0);
+                    checkSponsorship(ltx, c, 0, nullptr, 2, 0, 0, 0);
                 }
 
                 SECTION("cross one offer fully and one partially")
@@ -4561,9 +4557,7 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                     checkSponsorship(ltx, a1, 0, nullptr, 3, 2, 0, 1);
                     checkSponsorship(ltx, a2, 0, nullptr, 3, 2, 0, 1);
                     checkSponsorship(ltx, b, 0, nullptr, 2, 2, 2, 0);
-                    checkSponsorship(ltx, c, 0, nullptr, 2,
-                                     ltx.getHeader().ledgerVersion < 16 ? 0 : 2,
-                                     0, 0);
+                    checkSponsorship(ltx, c, 0, nullptr, 2, 0, 0, 0);
                 }
 
                 SECTION("cross two offers fully")
@@ -4580,9 +4574,7 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                     checkSponsorship(ltx, a1, 0, nullptr, 2, 2, 0, 0);
                     checkSponsorship(ltx, a2, 0, nullptr, 3, 2, 0, 1);
                     checkSponsorship(ltx, b, 0, nullptr, 2, 2, 1, 0);
-                    checkSponsorship(ltx, c, 0, nullptr, 2,
-                                     ltx.getHeader().ledgerVersion < 16 ? 0 : 2,
-                                     0, 0);
+                    checkSponsorship(ltx, c, 0, nullptr, 2, 0, 0, 0);
                 }
 
                 SECTION("cross two offers fully and one partially")
@@ -4601,9 +4593,7 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                     checkSponsorship(ltx, a1, 0, nullptr, 2, 2, 0, 0);
                     checkSponsorship(ltx, a2, 0, nullptr, 3, 2, 0, 1);
                     checkSponsorship(ltx, b, 0, nullptr, 2, 2, 1, 0);
-                    checkSponsorship(ltx, c, 0, nullptr, 2,
-                                     ltx.getHeader().ledgerVersion < 16 ? 0 : 2,
-                                     0, 0);
+                    checkSponsorship(ltx, c, 0, nullptr, 2, 0, 0, 0);
                 }
 
                 SECTION("cross three offers fully")
@@ -4620,9 +4610,7 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                     checkSponsorship(ltx, a1, 0, nullptr, 2, 2, 0, 0);
                     checkSponsorship(ltx, a2, 0, nullptr, 2, 2, 0, 0);
                     checkSponsorship(ltx, b, 0, nullptr, 2, 2, 0, 0);
-                    checkSponsorship(ltx, c, 0, nullptr, 2,
-                                     ltx.getHeader().ledgerVersion < 16 ? 0 : 2,
-                                     0, 0);
+                    checkSponsorship(ltx, c, 0, nullptr, 2, 0, 0, 0);
                 }
             };
 
@@ -4714,12 +4702,8 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                                      &a1.getPublicKey());
                     checkSponsorship(ltx, a1, 0, nullptr, 4, 2, 1, 2);
                     checkSponsorship(ltx, a2, 0, nullptr, 3, 2, 2, 1);
-                    checkSponsorship(ltx, b, 0, nullptr, 2,
-                                     ltx.getHeader().ledgerVersion < 16 ? 0 : 2,
-                                     0, 0);
-                    checkSponsorship(ltx, c, 0, nullptr, 2,
-                                     ltx.getHeader().ledgerVersion < 16 ? 0 : 2,
-                                     0, 0);
+                    checkSponsorship(ltx, b, 0, nullptr, 2, 0, 0, 0);
+                    checkSponsorship(ltx, c, 0, nullptr, 2, 0, 0, 0);
                 }
 
                 SECTION("cross one offer fully")
@@ -4735,12 +4719,8 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                                      &a1.getPublicKey());
                     checkSponsorship(ltx, a1, 0, nullptr, 3, 2, 1, 1);
                     checkSponsorship(ltx, a2, 0, nullptr, 3, 2, 1, 1);
-                    checkSponsorship(ltx, b, 0, nullptr, 2,
-                                     ltx.getHeader().ledgerVersion < 16 ? 0 : 2,
-                                     0, 0);
-                    checkSponsorship(ltx, c, 0, nullptr, 2,
-                                     ltx.getHeader().ledgerVersion < 16 ? 0 : 2,
-                                     0, 0);
+                    checkSponsorship(ltx, b, 0, nullptr, 2, 0, 0, 0);
+                    checkSponsorship(ltx, c, 0, nullptr, 2, 0, 0, 0);
                 }
 
                 SECTION("cross one offer fully and one partially")
@@ -4757,12 +4737,8 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                                      &a1.getPublicKey());
                     checkSponsorship(ltx, a1, 0, nullptr, 3, 2, 1, 1);
                     checkSponsorship(ltx, a2, 0, nullptr, 3, 2, 1, 1);
-                    checkSponsorship(ltx, b, 0, nullptr, 2,
-                                     ltx.getHeader().ledgerVersion < 16 ? 0 : 2,
-                                     0, 0);
-                    checkSponsorship(ltx, c, 0, nullptr, 2,
-                                     ltx.getHeader().ledgerVersion < 16 ? 0 : 2,
-                                     0, 0);
+                    checkSponsorship(ltx, b, 0, nullptr, 2, 0, 0, 0);
+                    checkSponsorship(ltx, c, 0, nullptr, 2, 0, 0, 0);
                 }
 
                 SECTION("cross two offers fully")
@@ -4776,12 +4752,8 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                                      &a1.getPublicKey());
                     checkSponsorship(ltx, a1, 0, nullptr, 2, 2, 1, 0);
                     checkSponsorship(ltx, a2, 0, nullptr, 3, 2, 0, 1);
-                    checkSponsorship(ltx, b, 0, nullptr, 2,
-                                     ltx.getHeader().ledgerVersion < 16 ? 0 : 2,
-                                     0, 0);
-                    checkSponsorship(ltx, c, 0, nullptr, 2,
-                                     ltx.getHeader().ledgerVersion < 16 ? 0 : 2,
-                                     0, 0);
+                    checkSponsorship(ltx, b, 0, nullptr, 2, 0, 0, 0);
+                    checkSponsorship(ltx, c, 0, nullptr, 2, 0, 0, 0);
                 }
 
                 SECTION("cross two offers fully and one partially")
@@ -4797,12 +4769,8 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                                      &a1.getPublicKey());
                     checkSponsorship(ltx, a1, 0, nullptr, 2, 2, 1, 0);
                     checkSponsorship(ltx, a2, 0, nullptr, 3, 2, 0, 1);
-                    checkSponsorship(ltx, b, 0, nullptr, 2,
-                                     ltx.getHeader().ledgerVersion < 16 ? 0 : 2,
-                                     0, 0);
-                    checkSponsorship(ltx, c, 0, nullptr, 2,
-                                     ltx.getHeader().ledgerVersion < 16 ? 0 : 2,
-                                     0, 0);
+                    checkSponsorship(ltx, b, 0, nullptr, 2, 0, 0, 0);
+                    checkSponsorship(ltx, c, 0, nullptr, 2, 0, 0, 0);
                 }
 
                 SECTION("cross three offers fully")
@@ -4816,12 +4784,8 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                     LedgerTxn ltx(app->getLedgerTxnRoot());
                     checkSponsorship(ltx, a1, 0, nullptr, 2, 2, 0, 0);
                     checkSponsorship(ltx, a2, 0, nullptr, 2, 2, 0, 0);
-                    checkSponsorship(ltx, b, 0, nullptr, 2,
-                                     ltx.getHeader().ledgerVersion < 16 ? 0 : 2,
-                                     0, 0);
-                    checkSponsorship(ltx, c, 0, nullptr, 2,
-                                     ltx.getHeader().ledgerVersion < 16 ? 0 : 2,
-                                     0, 0);
+                    checkSponsorship(ltx, b, 0, nullptr, 2, 0, 0, 0);
+                    checkSponsorship(ltx, c, 0, nullptr, 2, 0, 0, 0);
                 }
             };
 

@@ -278,26 +278,8 @@ applyCheck(TransactionFramePtr tx, Application& app, bool checkSeqNum)
                 auto header = ltxTx.loadHeader();
                 if (checkSeqNum && ledgerVersion >= 10 && !earlyFailure)
                 {
-                    REQUIRE(srcAccountAfter.current().data.account().seqNum >
-                            srcAccountBefore.seqNum);
                     REQUIRE(srcAccountAfter.current().data.account().seqNum ==
-                            tx->getSeqNum());
-                    if (ledgerVersion >= 18)
-                    {
-                        REQUIRE(srcAccountAfter.current()
-                                    .data.account()
-                                    .ext.v1()
-                                    .ext.v2()
-                                    .ext.v3()
-                                    .seqTime ==
-                                header.current().scpValue.closeTime);
-                        REQUIRE(srcAccountAfter.current()
-                                    .data.account()
-                                    .ext.v1()
-                                    .ext.v2()
-                                    .ext.v3()
-                                    .seqLedger == header.current().ledgerSeq);
-                    }
+                            (srcAccountBefore.seqNum + 1));
                 }
                 // on failure, no other changes should have been made
                 if (!res)
@@ -337,13 +319,6 @@ applyCheck(TransactionFramePtr tx, Application& app, bool checkSeqNum)
                                 // should make the accounts equivalent
                                 currAcc.signers = prevAcc.signers;
                                 currAcc.numSubEntries = prevAcc.numSubEntries;
-                                if (hasAccountEntryExtV2(currAcc))
-                                {
-                                    getAccountEntryExtensionV2(currAcc)
-                                        .signerSponsoringIDs =
-                                        getAccountEntryExtensionV2(prevAcc)
-                                            .signerSponsoringIDs;
-                                }
                                 REQUIRE(currAcc == prevAcc);
                             }
                         }

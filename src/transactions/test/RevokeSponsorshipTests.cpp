@@ -66,9 +66,7 @@ TEST_CASE("update sponsorship", "[tx][sponsorship]")
                     REQUIRE(tx->apply(*app, ltx, txm));
 
                     checkSponsorship(ltx, accountKey(a1), 0, nullptr);
-                    checkSponsorship(ltx, a1, 0, nullptr, 0,
-                                     ltx.getHeader().ledgerVersion < 16 ? 0 : 2,
-                                     0, 0);
+                    checkSponsorship(ltx, a1, 0, nullptr, 0, 0, 0, 0);
                     ltx.commit();
                 }
 
@@ -87,9 +85,7 @@ TEST_CASE("update sponsorship", "[tx][sponsorship]")
                     REQUIRE(tx->apply(*app, ltx, txm));
 
                     checkSponsorship(ltx, trustlineKey(a1, cur1), 0, nullptr);
-                    checkSponsorship(ltx, a1, 0, nullptr, 1,
-                                     ltx.getHeader().ledgerVersion < 16 ? 0 : 2,
-                                     0, 0);
+                    checkSponsorship(ltx, a1, 0, nullptr, 1, 0, 0, 0);
                     ltx.commit();
                 }
 
@@ -108,12 +104,8 @@ TEST_CASE("update sponsorship", "[tx][sponsorship]")
                     REQUIRE(txtest::checkValid(tx, ltx));
                     REQUIRE(tx->apply(*app, ltx, txm));
 
-                    checkSponsorship(ltx, a1, signer.key,
-                                     ltx.getHeader().ledgerVersion < 16 ? 0 : 2,
-                                     nullptr);
-                    checkSponsorship(ltx, a1, 0, nullptr, 1,
-                                     ltx.getHeader().ledgerVersion < 16 ? 0 : 2,
-                                     0, 0);
+                    checkSponsorship(ltx, a1, signer.key, 0, nullptr);
+                    checkSponsorship(ltx, a1, 0, nullptr, 1, 0, 0, 0);
                     ltx.commit();
                 }
 
@@ -869,12 +861,8 @@ TEST_CASE("update sponsorship", "[tx][sponsorship]")
                     REQUIRE(getRevokeSponsorshipResultCode(tx, 0) ==
                             REVOKE_SPONSORSHIP_DOES_NOT_EXIST);
 
-                    checkSponsorship(ltx, a1, 0, nullptr, 0,
-                                     ltx.getHeader().ledgerVersion < 16 ? 0 : 2,
-                                     0, 0);
-                    checkSponsorship(ltx, root, 0, nullptr, 0,
-                                     ltx.getHeader().ledgerVersion < 16 ? 0 : 2,
-                                     0, 0);
+                    checkSponsorship(ltx, a1, 0, nullptr, 0, 0, 0, 0);
+                    checkSponsorship(ltx, root, 0, nullptr, 0, 0, 0, 0);
                 }
 
                 SECTION("use wrong account in offer key")
@@ -902,12 +890,8 @@ TEST_CASE("update sponsorship", "[tx][sponsorship]")
                             REVOKE_SPONSORSHIP_DOES_NOT_EXIST);
 
                     checkSponsorship(ltx, a1, 0, nullptr, 0, 0, 0, 0);
-                    checkSponsorship(ltx, a2, 0, nullptr, 2,
-                                     ltx.getHeader().ledgerVersion < 16 ? 1 : 2,
-                                     0, 0);
-                    checkSponsorship(ltx, root, 0, nullptr, 0,
-                                     ltx.getHeader().ledgerVersion < 16 ? 0 : 2,
-                                     0, 0);
+                    checkSponsorship(ltx, a2, 0, nullptr, 2, 1, 0, 0);
+                    checkSponsorship(ltx, root, 0, nullptr, 0, 0, 0, 0);
                 }
 
                 SECTION("signer")
@@ -942,12 +926,8 @@ TEST_CASE("update sponsorship", "[tx][sponsorship]")
                     REQUIRE(getRevokeSponsorshipResultCode(tx2, 0) ==
                             REVOKE_SPONSORSHIP_DOES_NOT_EXIST);
 
-                    checkSponsorship(ltx, a1, 0, nullptr, 0,
-                                     ltx.getHeader().ledgerVersion < 16 ? 0 : 2,
-                                     0, 0);
-                    checkSponsorship(ltx, root, 0, nullptr, 0,
-                                     ltx.getHeader().ledgerVersion < 16 ? 0 : 2,
-                                     0, 0);
+                    checkSponsorship(ltx, a1, 0, nullptr, 0, 0, 0, 0);
+                    checkSponsorship(ltx, root, 0, nullptr, 0, 0, 0, 0);
                 }
             }
             SECTION("not sponsor")

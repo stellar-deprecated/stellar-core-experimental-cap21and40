@@ -3075,10 +3075,7 @@ TEST_CASE("create offer", "[tx][offers]")
                 auto c = prepareAccount("accC");
 
                 TestAccount* sponsor = isSponsored ? &c : nullptr;
-                auto& ltx = app->getLedgerTxnRoot();
-                int cExt = isSponsored
-                               ? 2
-                               : ltx.getHeader().ledgerVersion < 16 ? 0 : 2;
+                int cExt = isSponsored ? 2 : 0;
 
                 auto o1 =
                     market
@@ -3298,10 +3295,7 @@ TEST_CASE("create offer", "[tx][offers]")
                 auto c = prepareAccount("accC");
 
                 TestAccount* sponsor = isSponsored ? &c : nullptr;
-                auto& ltx = app->getLedgerTxnRoot();
-                int cExt = isSponsored
-                               ? 2
-                               : ltx.getHeader().ledgerVersion < 16 ? 0 : 2;
+                int cExt = isSponsored ? 2 : 0;
 
                 TestMarket market(*app);
                 auto o1 =
@@ -3475,7 +3469,7 @@ TEST_CASE("create offer", "[tx][offers]")
                     checkSponsorship(ltx, a1, 0, nullptr, 2, 2, 0, 0);
                     checkSponsorship(ltx, a2, 0, nullptr, 2, 2, 0, 0);
                     int bExt = 0;
-                    if (isSponsored || ltx.getHeader().ledgerVersion >= 18)
+                    if (isSponsored)
                     {
                         bExt = 2;
                     }
