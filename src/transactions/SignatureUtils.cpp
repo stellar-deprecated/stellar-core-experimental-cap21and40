@@ -79,15 +79,22 @@ verifySignedPayload(DecoratedSignature const& sig, SignerKey const& signerKey)
 {
     ZoneScoped;
 
-    PublicKey pubKey;
-    pubKey.ed25519() = signerKey.ed25519SignedPayload().ed25519;
+    auto signedPayload = signerKey.ed25519SignedPayload();
 
-    if (!doesHintMatch(pubKey.ed25519(), sig.hint))
+    auto pubKeyHint = getHint(signedPayload.ed25519);
+    auto payloadHint = getHint(signedPayload.payload);
+    SignatureHint hint;
+    hint[0] = pubKeyHint[0] ^ payloadHint[0];
+    hint[1] = pubKeyHint[1] ^ payloadHint[1];
+    hint[2] = pubKeyHint[2] ^ payloadHint[2];
+    hint[3] = pubKeyHint[3] ^ payloadHint[3];
+
+    if (!doesHintMatch(hint, sig.hint))
         return false;
 
-    auto payload = signerKey.ed25519SignedPayload().payload;
-
-    return PubKeyUtils::verifySig(pubKey, sig.signature, payload);
+    PublicKey pubKey;
+    pubKey.ed25519() = signedPayload.ed25519;
+    return PubKeyUtils::verifySig(pubKey, sig.signature, signedPayload.payload);
 }
 
 SignatureHint
