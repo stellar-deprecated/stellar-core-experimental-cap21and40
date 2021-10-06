@@ -1313,7 +1313,7 @@ TEST_CASE("LedgerTxn load", "[ledgertxn]")
             validate(ltx3, {});
         }
 
-        for_versions_from(15, *app, [&]() {
+        for_all_versions(*app, [&]() {
             SECTION("invalid keys")
             {
                 LedgerTxn ltx1(app->getLedgerTxnRoot());
@@ -1343,9 +1343,6 @@ TEST_CASE("LedgerTxn load", "[ledgertxn]")
                     for (auto const& asset : invalidAssets)
                     {
                         auto key = trustlineKey(acc2.getPublicKey(), asset);
-
-                        // verify that this doesn't throw before V15
-                        validateTrustLineKey(14, key);
 
                         REQUIRE_THROWS_AS(ltx1.load(key),
                                           NonSociRelatedException);
@@ -2047,6 +2044,7 @@ TEST_CASE("LedgerTxn loadBestOffer", "[ledgertxn]")
         {
             VirtualClock clock;
             auto cfg = getTestConfig(0, mode);
+            TempReduceLimitsForTesting limitUpdater(100, 10);
 
             // Enough space to store an offer, 1002 accounts (to keep a missing
             // account from evicting a prefetched account), and 2000 trustlines
@@ -2062,9 +2060,9 @@ TEST_CASE("LedgerTxn loadBestOffer", "[ledgertxn]")
             oe = LedgerTestUtils::generateValidOfferEntry();
             oe.offerID = 1;
 
-            // The comments below are written assuming MAX_OFFERS_TO_CROSS is
-            // 1000
-            int64_t numOffers = MAX_OFFERS_TO_CROSS + 2;
+            // The comments below are written assuming getMaxOffersToCross()
+            //  is 1000
+            int64_t numOffers = getMaxOffersToCross() + 2;
             auto accounts =
                 LedgerTestUtils::generateValidAccountEntries(numOffers);
             // First create 1002 offers that have different accounts and
@@ -2112,7 +2110,7 @@ TEST_CASE("LedgerTxn loadBestOffer", "[ledgertxn]")
                 // Note that we can't prefetch for more than 1000 offers
                 double expectedPrefetchHitRate =
                     std::min(numOffers - offerID,
-                             static_cast<int64_t>(MAX_OFFERS_TO_CROSS)) /
+                             static_cast<int64_t>(getMaxOffersToCross())) /
                     static_cast<double>(accounts.size());
                 REQUIRE(fabs(expectedPrefetchHitRate -
                              ltx2.getPrefetchHitRate()) < .000001);
@@ -2122,13 +2120,13 @@ TEST_CASE("LedgerTxn loadBestOffer", "[ledgertxn]")
             SECTION("prefetch for all worse remaining offers")
             {
                 // There are 1000 better offers than offerID 2
-                loadOfferAndPrefetch(numOffers - MAX_OFFERS_TO_CROSS);
+                loadOfferAndPrefetch(numOffers - getMaxOffersToCross());
             }
             SECTION("prefetch for the next MAX_OFFERS_TO_CROSS offers")
             {
                 // There are 1001 better offers than offerID 1. Should still
                 // only prefetch for 1000
-                loadOfferAndPrefetch(numOffers - MAX_OFFERS_TO_CROSS - 1);
+                loadOfferAndPrefetch(numOffers - getMaxOffersToCross() - 1);
             }
             SECTION("prefetch less than MAX_OFFERS_TO_CROSS offers")
             {
@@ -3737,5 +3735,287 @@ TEST_CASE("LedgerTxn best offers cache eviction", "[ledgertxn]")
         // Access the cache to check if it is valid
         auto ltxe = ltx1.loadBestOffer(buying, selling);
         REQUIRE(ltxe.current().data.offer().offerID == 1);
+    }
+}
+
+typedef std::map<std::tuple<AccountID, Asset, Asset>, int64_t> PoolShareUpdates;
+typedef std::map<std::pair<Asset, Asset>, int64_t> LiquidityPoolUpdates;
+
+static PoolID
+getPoolID(Asset const& assetA, Asset const& assetB)
+{
+    return sha256(xdr::xdr_to_opaque(LIQUIDITY_POOL_CONSTANT_PRODUCT, assetA,
+                                     assetB, LIQUIDITY_POOL_FEE_V18));
+}
+
+static void
+applyLedgerTxnUpdates(AbstractLedgerTxn& ltx, PoolShareUpdates const& updates)
+{
+    for (auto const& kv : updates)
+    {
+        LedgerKey key(TRUSTLINE);
+        key.trustLine().accountID = std::get<0>(kv.first);
+        key.trustLine().asset.type(ASSET_TYPE_POOL_SHARE);
+        key.trustLine().asset.liquidityPoolID() =
+            getPoolID(std::get<1>(kv.first), std::get<2>(kv.first));
+
+        auto ltxe = ltx.load(key);
+        if (ltxe && kv.second > 0)
+        {
+            ltxe.current().data.trustLine().limit = kv.second;
+        }
+        else if (ltxe)
+        {
+            ltxe.erase();
+        }
+        else
+        {
+            REQUIRE(kv.second > 0);
+            LedgerEntry trust;
+            trust.lastModifiedLedgerSeq = ltx.loadHeader().current().ledgerSeq;
+            trust.data.type(TRUSTLINE);
+
+            auto& tl = trust.data.trustLine();
+            tl = LedgerTestUtils::generateValidTrustLineEntry();
+            tl.accountID = key.trustLine().accountID;
+            tl.asset = key.trustLine().asset;
+            tl.limit = kv.second;
+
+            ltx.create(trust);
+        }
+    }
+}
+
+static void
+applyLedgerTxnUpdates(AbstractLedgerTxn& ltx,
+                      LiquidityPoolUpdates const& updates)
+{
+    for (auto const& kv : updates)
+    {
+        LedgerKey key(LIQUIDITY_POOL);
+        key.liquidityPool().liquidityPoolID =
+            getPoolID(kv.first.first, kv.first.second);
+
+        auto ltxe = ltx.load(key);
+        if (ltxe && kv.second > 0)
+        {
+            ltxe.current()
+                .data.liquidityPool()
+                .body.constantProduct()
+                .poolSharesTrustLineCount = kv.second;
+        }
+        else if (ltxe)
+        {
+            ltxe.erase();
+        }
+        else
+        {
+            REQUIRE(kv.second > 0);
+            LedgerEntry pool;
+            pool.lastModifiedLedgerSeq = ltx.loadHeader().current().ledgerSeq;
+            pool.data.type(LIQUIDITY_POOL);
+
+            auto& lp = pool.data.liquidityPool();
+            lp = LedgerTestUtils::generateValidLiquidityPoolEntry();
+            lp.liquidityPoolID = key.liquidityPool().liquidityPoolID;
+            auto& cp = lp.body.constantProduct();
+            cp.params.assetA = kv.first.first;
+            cp.params.assetB = kv.first.second;
+            cp.poolSharesTrustLineCount = kv.second;
+
+            ltx.create(pool);
+        }
+    }
+}
+
+static void
+testPoolShareTrustLinesByAccountAndAsset(
+    AbstractLedgerTxnParent& ltxParent, AccountID const& accountID,
+    Asset const& asset,
+    std::vector<std::tuple<Asset, Asset, int64_t>> const& expected,
+    std::vector<std::pair<PoolShareUpdates,
+                          LiquidityPoolUpdates>>::const_iterator begin,
+    std::vector<std::pair<PoolShareUpdates,
+                          LiquidityPoolUpdates>>::const_iterator const& end)
+{
+    REQUIRE(begin != end);
+    LedgerTxn ltx(ltxParent);
+    applyLedgerTxnUpdates(ltx, begin->first);
+    applyLedgerTxnUpdates(ltx, begin->second);
+
+    if (++begin != end)
+    {
+        testPoolShareTrustLinesByAccountAndAsset(ltx, accountID, asset,
+                                                 expected, begin, end);
+    }
+    else
+    {
+        auto poolShares =
+            ltx.loadPoolShareTrustLinesByAccountAndAsset(accountID, asset);
+        REQUIRE(expected.size() == poolShares.size());
+        auto expected2 = expected;
+
+        for (auto& cur : poolShares)
+        {
+            auto const& tl = cur.current().data.trustLine();
+            auto it = std::find_if(
+                expected2.begin(), expected2.end(), [&](auto const& x) {
+                    auto poolID = getPoolID(std::get<0>(x), std::get<1>(x));
+                    return tl.accountID == accountID &&
+                           tl.asset.liquidityPoolID() == poolID &&
+                           tl.limit == std::get<2>(x);
+                });
+            REQUIRE(it != expected2.end());
+            expected2.erase(it);
+        }
+    }
+}
+
+static void
+testPoolShareTrustLinesByAccountAndAsset(
+    AccountID const& accountID, Asset const& asset,
+    std::vector<std::tuple<Asset, Asset, int64_t>> const& expected,
+    std::vector<std::pair<PoolShareUpdates, LiquidityPoolUpdates>> updates)
+{
+    REQUIRE(!updates.empty());
+
+    auto testAtRoot = [&](Application& app) {
+        {
+            LedgerTxn ltx1(app.getLedgerTxnRoot());
+            applyLedgerTxnUpdates(ltx1, updates.cbegin()->first);
+            applyLedgerTxnUpdates(ltx1, updates.cbegin()->second);
+            ltx1.commit();
+        }
+        testPoolShareTrustLinesByAccountAndAsset(
+            app.getLedgerTxnRoot(), accountID, asset, expected,
+            ++updates.cbegin(), updates.cend());
+    };
+
+    // first changes are in LedgerTxnRoot with cache
+    if (updates.size() > 1)
+    {
+        VirtualClock clock;
+        auto app = createTestApplication(clock, getTestConfig());
+
+        for_versions_from(18, *app, [&] { testAtRoot(*app); });
+    }
+
+    // first changes are in LedgerTxnRoot without cache
+    if (updates.size() > 1)
+    {
+        VirtualClock clock;
+        auto cfg = getTestConfig();
+        cfg.ENTRY_CACHE_SIZE = 0;
+        auto app = createTestApplication(clock, cfg);
+
+        for_versions_from(18, *app, [&] { testAtRoot(*app); });
+    }
+
+    // first changes are in child of LedgerTxnRoot
+    {
+        VirtualClock clock;
+        auto app = createTestApplication(clock, getTestConfig());
+
+        for_versions_from(18, *app, [&] {
+            testPoolShareTrustLinesByAccountAndAsset(
+                app->getLedgerTxnRoot(), accountID, asset, expected,
+                updates.cbegin(), updates.cend());
+        });
+    }
+}
+
+TEST_CASE("LedgerTxn loadPoolShareTrustLinesByAccountAndAsset", "[ledgertxn]")
+{
+    auto a1 = LedgerTestUtils::generateValidAccountEntry().accountID;
+    auto a2 = LedgerTestUtils::generateValidAccountEntry().accountID;
+
+    Asset native(ASSET_TYPE_NATIVE);
+    Asset cur1 = txtest::makeAsset(txtest::getAccount("issuer"), "CUR1");
+    Asset cur2 = txtest::makeAsset(txtest::getAccount("issuer"), "CUR2");
+    if (cur2 < cur1)
+    {
+        std::swap(cur1, cur2);
+    }
+
+    SECTION("fails with children")
+    {
+        VirtualClock clock;
+        auto app = createTestApplication(clock, getTestConfig());
+
+        LedgerTxn ltx1(app->getLedgerTxnRoot());
+        LedgerTxn ltx2(ltx1);
+        REQUIRE_THROWS_AS(
+            ltx1.loadPoolShareTrustLinesByAccountAndAsset(a1, cur1),
+            std::runtime_error);
+    }
+
+    SECTION("fails if sealed")
+    {
+        VirtualClock clock;
+        auto app = createTestApplication(clock, getTestConfig());
+
+        LedgerTxn ltx1(app->getLedgerTxnRoot());
+        ltx1.getDelta();
+        REQUIRE_THROWS_AS(
+            ltx1.loadPoolShareTrustLinesByAccountAndAsset(a1, cur1),
+            std::runtime_error);
+    }
+
+    SECTION("empty parent")
+    {
+        SECTION("no trust lines")
+        {
+            testPoolShareTrustLinesByAccountAndAsset(a1, cur1, {}, {{}});
+        }
+
+        SECTION("two trust lines - assetA")
+        {
+            testPoolShareTrustLinesByAccountAndAsset(
+                a1, cur1, {{cur1, native, 1}, {cur1, cur2, 2}},
+                {{{{{a1, cur1, native}, 1}, {{a1, cur1, cur2}, 2}},
+                  {{{cur1, native}, 1}, {{cur1, cur2}, 1}}}});
+        }
+
+        SECTION("two trust lines - assetB")
+        {
+            testPoolShareTrustLinesByAccountAndAsset(
+                a1, cur2, {{cur1, cur2, 1}},
+                {{{{{a1, cur1, cur2}, 1}}, {{{cur1, cur2}, 1}}}});
+        }
+    }
+
+    SECTION("one trust line in parent")
+    {
+        SECTION("liquidity pool modified more recently than trust line")
+        {
+            testPoolShareTrustLinesByAccountAndAsset(
+                a1, cur1, {{cur1, native, 1}},
+                {{{{{a1, cur1, native}, 1}}, {{{cur1, native}, 1}}},
+                 {{{{a2, cur1, native}, 1}}, {{{cur1, native}, 2}}}});
+        }
+
+        SECTION("trust line modified more recently than liquidity pool")
+        {
+            testPoolShareTrustLinesByAccountAndAsset(
+                a1, cur1, {{cur1, native, 2}},
+                {{{{{a1, cur1, native}, 1}}, {{{cur1, native}, 1}}},
+                 {{{{a1, cur1, native}, 2}}, {}}});
+        }
+
+        SECTION("trust line erased")
+        {
+            testPoolShareTrustLinesByAccountAndAsset(
+                a1, cur1, {},
+                {{{{{a1, cur1, native}, 1}}, {{{cur1, native}, 1}}},
+                 {{{{a1, cur1, native}, 0}, {{a2, cur1, native}, 1}}, {}}});
+        }
+
+        SECTION("liquidity pool and trust line erased")
+        {
+            testPoolShareTrustLinesByAccountAndAsset(
+                a1, cur1, {},
+                {{{{{a1, cur1, native}, 1}}, {{{cur1, native}, 1}}},
+                 {{{{a1, cur1, native}, 0}}, {{{cur1, native}, 0}}}});
+        }
     }
 }

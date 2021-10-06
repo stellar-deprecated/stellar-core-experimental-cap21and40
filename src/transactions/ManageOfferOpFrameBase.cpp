@@ -10,6 +10,7 @@
 #include "transactions/OfferExchange.h"
 #include "transactions/SponsorshipUtils.h"
 #include "transactions/TransactionUtils.h"
+#include "util/GlobalChecks.h"
 #include <Tracy.hpp>
 
 namespace stellar
@@ -329,33 +330,33 @@ ManageOfferOpFrameBase::doApply(AbstractLedgerTxn& ltxOuter)
         if (ltx.loadHeader().current().ledgerVersion >=
             FIRST_PROTOCOL_SUPPORTING_OPERATION_LIMITS)
         {
-            maxOffersToCross = MAX_OFFERS_TO_CROSS;
+            maxOffersToCross = getMaxOffersToCross();
         }
 
         int64_t sheepSent, wheatReceived;
         std::vector<ClaimAtom> offerTrail;
         Price maxWheatPrice(mPrice.d, mPrice.n);
-        ConvertResult r = convertWithOffers(
+        ConvertResult r = convertWithOffersAndPools(
             ltx, mSheep, maxSheepSend, sheepSent, mWheat, maxWheatReceive,
             wheatReceived, RoundingType::NORMAL,
             [this, passive, &maxWheatPrice](LedgerTxnEntry const& entry) {
                 auto const& o = entry.current().data.offer();
-                assert(o.offerID != mOfferID);
+                releaseAssertOrThrow(o.offerID != mOfferID);
                 if ((passive && (o.price >= maxWheatPrice)) ||
                     (o.price > maxWheatPrice))
                 {
-                    return OfferFilterResult::eStop;
+                    return OfferFilterResult::eStopBadPrice;
                 }
                 if (o.sellerID == getSourceID())
                 {
                     // we are crossing our own offer
-                    setResultCrossSelf();
-                    return OfferFilterResult::eStop;
+                    return OfferFilterResult::eStopCrossSelf;
                 }
                 return OfferFilterResult::eKeep;
             },
             offerTrail, maxOffersToCross);
-        assert(sheepSent >= 0);
+
+        releaseAssertOrThrow(sheepSent >= 0);
 
         bool sheepStays;
         switch (r)
@@ -366,13 +367,12 @@ ManageOfferOpFrameBase::doApply(AbstractLedgerTxn& ltxOuter)
         case ConvertResult::ePartial:
             sheepStays = true;
             break;
-        case ConvertResult::eFilterStop:
-            if (!isResultSuccess())
-            {
-                return false;
-            }
+        case ConvertResult::eFilterStopBadPrice:
             sheepStays = true;
             break;
+        case ConvertResult::eFilterStopCrossSelf:
+            setResultCrossSelf();
+            return false;
         case ConvertResult::eCrossedTooMany:
             mResult.code(opEXCEEDED_WORK_LIMIT);
             return false;

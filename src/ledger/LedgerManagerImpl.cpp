@@ -424,6 +424,10 @@ void
 LedgerManagerImpl::valueExternalized(LedgerCloseData const& ledgerData)
 {
     ZoneScoped;
+
+    // Capture LCL before we do any processing (which may trigger ledger close)
+    auto lcl = getLastClosedLedgerNum();
+
     CLOG_INFO(Ledger,
               "Got consensus: [seq={}, prev={}, txs={}, ops={}, sv: {}]",
               ledgerData.getLedgerSeq(),
@@ -436,7 +440,7 @@ LedgerManagerImpl::valueExternalized(LedgerCloseData const& ledgerData)
         st != LedgerManager::LM_CATCHING_UP_STATE &&
         st != LedgerManager::LM_SYNCED_STATE)
     {
-        assert(false);
+        releaseAssert(false);
     }
 
     closeLedgerIf(ledgerData);
@@ -450,6 +454,14 @@ LedgerManagerImpl::valueExternalized(LedgerCloseData const& ledgerData)
     if (!cm.hasBufferedLedger())
     {
         setState(LM_SYNCED_STATE);
+        // New ledger(s) got closed, notify Herder
+        if (getLastClosedLedgerNum() > lcl)
+        {
+            CLOG_DEBUG(Ledger,
+                       "LedgerManager::valueExternalized LCL advanced {} -> {}",
+                       lcl, getLastClosedLedgerNum());
+            mApp.getHerder().lastClosedLedgerIncreased();
+        }
     }
 
     FrameMark;
@@ -765,14 +777,19 @@ LedgerManagerImpl::closeLedger(LedgerCloseData const& ledgerData)
     // step 4
     mApp.getBucketManager().forgetUnreferencedBuckets();
 
-    if (!mApp.getConfig().getOpApplySleepTimeForTesting().empty())
+    if (!mApp.getConfig().OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING.empty())
     {
         // Sleep for a parameterized amount of time in simulation mode
+        std::discrete_distribution<uint32> distribution(
+            mApp.getConfig().OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING.begin(),
+            mApp.getConfig().OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING.end());
         std::chrono::microseconds sleepFor{0};
         for (size_t i = 0; i < txSet->sizeOp(); i++)
         {
             sleepFor +=
-                rand_element(mApp.getConfig().getOpApplySleepTimeForTesting());
+                mApp.getConfig()
+                    .OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING[distribution(
+                        gRandomEngine)];
         }
         std::chrono::microseconds applicationTime =
             closeLedgerTime.checkElapsedTime();
@@ -1158,7 +1175,7 @@ LedgerManagerImpl::storeCurrentLedger(LedgerHeader const& header)
     ZoneScoped;
 
     Hash hash = xdrSha256(header);
-    assert(!isZero(hash));
+    releaseAssert(!isZero(hash));
     mApp.getPersistentState().setState(PersistentState::kLastClosedLedger,
                                        binToHex(hash));
 

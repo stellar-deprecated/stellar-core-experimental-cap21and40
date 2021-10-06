@@ -6,6 +6,7 @@
 #include "invariant/InvariantManager.h"
 #include "ledger/LedgerTxn.h"
 #include "main/Application.h"
+#include "util/GlobalChecks.h"
 #include "util/Logging.h"
 #include "util/UnorderedMap.h"
 #include <fmt/format.h>
@@ -13,17 +14,38 @@
 namespace stellar
 {
 
+static bool
+isPoolShareTrustline(LedgerEntry const& le)
+{
+    return le.data.type() == TRUSTLINE &&
+           le.data.trustLine().asset.type() == ASSET_TYPE_POOL_SHARE;
+}
+
 static int32_t
 calculateDelta(LedgerEntry const* current, LedgerEntry const* previous)
 {
     int32_t delta = 0;
     if (current)
     {
-        ++delta;
+        if (isPoolShareTrustline(*current))
+        {
+            delta += 2;
+        }
+        else
+        {
+            ++delta;
+        }
     }
     if (previous)
     {
-        --delta;
+        if (isPoolShareTrustline(*previous))
+        {
+            delta -= 2;
+        }
+        else
+        {
+            --delta;
+        }
     }
     return delta;
 }
@@ -34,7 +56,7 @@ updateChangedSubEntriesCount(
     LedgerEntry const* current, LedgerEntry const* previous)
 {
     auto valid = current ? current : previous;
-    assert(valid);
+    releaseAssert(valid);
 
     switch (valid->data.type())
     {
@@ -149,7 +171,7 @@ AccountSubEntriesCountIsValid::checkOnOperationApply(
         {
             continue;
         }
-        assert(entryDelta.second.previous);
+        releaseAssert(entryDelta.second.previous);
 
         auto const& genPrevious = *entryDelta.second.previous;
         if (genPrevious.type() != InternalLedgerEntryType::LEDGER_ENTRY)

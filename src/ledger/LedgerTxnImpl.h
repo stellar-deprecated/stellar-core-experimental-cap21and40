@@ -424,7 +424,7 @@ class LedgerTxn::Impl
   public:
     // Constructor has the strong exception safety guarantee
     Impl(LedgerTxn& self, AbstractLedgerTxnParent& parent,
-         bool shouldUpdateLastModified);
+         bool shouldUpdateLastModified, TransactionMode mode);
 
     // addChild has the strong exception safety guarantee
     void addChild(AbstractLedgerTxn& child);
@@ -498,6 +498,15 @@ class LedgerTxn::Impl
     //   modified
     UnorderedMap<LedgerKey, LedgerEntry>
     getOffersByAccountAndAsset(AccountID const& account, Asset const& asset);
+
+    // getPoolShareTrustLinesByAccountAndAsset has the basic exception safety
+    // guarantee. If it throws an exception, then
+    // - the prepared statement cache may be, but is not guaranteed to be,
+    //   modified
+    // - the entry cache may be, but is not guaranteed to be, modified.
+    UnorderedMap<LedgerKey, LedgerEntry>
+    getPoolShareTrustLinesByAccountAndAsset(AccountID const& account,
+                                            Asset const& asset);
 
     // getHeader does not throw
     LedgerHeader const& getHeader() const;
@@ -576,6 +585,14 @@ class LedgerTxn::Impl
     loadOffersByAccountAndAsset(LedgerTxn& self, AccountID const& accountID,
                                 Asset const& asset);
 
+    // loadPoolShareTrustLinesByAccountAndAsset has the basic exception safety
+    // guarantee. If it throws an exception, then
+    // - the prepared statement cache may be, but is not guaranteed to be,
+    //   modified
+    // - the entry cache may be, but is not guaranteed to be, modified.
+    std::vector<LedgerTxnEntry> loadPoolShareTrustLinesByAccountAndAsset(
+        LedgerTxn& self, AccountID const& account, Asset const& asset);
+
     // loadWithoutRecord has the basic exception safety guarantee. If it throws
     // an exception, then
     // - the prepared statement cache may be, but is not guaranteed to be,
@@ -596,6 +613,8 @@ class LedgerTxn::Impl
     uint32_t prefetch(UnorderedSet<LedgerKey> const& keys);
 
     double getPrefetchHitRate() const;
+
+    void prepareNewObjects(size_t s);
 
     // hasSponsorshipEntry has the strong exception safety guarantee
     bool hasSponsorshipEntry() const;
@@ -744,6 +763,9 @@ class LedgerTxnRoot::Impl
                                                       int64_t minBalance) const;
     std::shared_ptr<LedgerEntry const>
     loadTrustLine(LedgerKey const& key) const;
+    std::vector<LedgerEntry>
+    loadPoolShareTrustLinesByAccountAndAsset(AccountID const& accountID,
+                                             Asset const& asset) const;
     std::shared_ptr<LedgerEntry const>
     loadClaimableBalance(LedgerKey const& key) const;
     std::shared_ptr<LedgerEntry const>
@@ -828,7 +850,7 @@ class LedgerTxnRoot::Impl
     ~Impl();
 
     // addChild has the strong exception safety guarantee.
-    void addChild(AbstractLedgerTxn& child);
+    void addChild(AbstractLedgerTxn& child, TransactionMode mode);
 
     // commitChild has the strong exception safety guarantee.
     void commitChild(EntryIterator iter, LedgerTxnConsistency cons);
@@ -879,6 +901,14 @@ class LedgerTxnRoot::Impl
     UnorderedMap<LedgerKey, LedgerEntry>
     getOffersByAccountAndAsset(AccountID const& account, Asset const& asset);
 
+    // getPoolShareTrustLinesByAccountAndAsset has the basic exception safety
+    // guarantee. If it throws an exception, then
+    // - the prepared statement cache may be, but is not guaranteed to be,
+    //   modified
+    UnorderedMap<LedgerKey, LedgerEntry>
+    getPoolShareTrustLinesByAccountAndAsset(AccountID const& account,
+                                            Asset const& asset);
+
     // getHeader does not throw
     LedgerHeader const& getHeader() const;
 
@@ -906,6 +936,8 @@ class LedgerTxnRoot::Impl
     uint32_t prefetch(UnorderedSet<LedgerKey> const& keys);
 
     double getPrefetchHitRate() const;
+
+    void prepareNewObjects(size_t s);
 
 #ifdef BEST_OFFER_DEBUGGING
     bool bestOfferDebuggingEnabled() const;

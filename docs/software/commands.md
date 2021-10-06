@@ -8,7 +8,7 @@ stellar-core can be controlled via the following commands.
 ## Common options
 Common options can be placed at any place in the command line.
 
-* **--conf <FILE-NAME>**: Specify a config file to use. You can use '/dev/stdin' and
+* **--conf <FILE-NAME>**: Specify a config file to use. You can use 'stdin' and
   provide the config file via STDIN. *default 'stellar-core.cfg'*
 * **--ll <LEVEL>**: Set the log level. It is redundant with `http-command ll`
   but we need this form if you want to change the log level during test runs.
@@ -57,11 +57,11 @@ Command options can only by placed after command.
 * **offline-info**: Returns an output similar to `--c info` for an offline
   instance
 * **print-xdr <FILE-NAME>**:  Pretty-print a binary file containing an XDR
-  object. If FILE-NAME is "/dev/stdin", the XDR object is read from standard input.<br>
+  object. If FILE-NAME is "stdin", the XDR object is read from standard input.<br>
   Option **--filetype [auto|ledgerheader|meta|result|resultpair|tx|txfee]**
   controls type used for printing (default: auto).<br>
   Option **--base64** alters the behavior to work on base64-encoded XDR rather than
-  raw XDR.
+  raw XDR, and converts a stream of encoded objects separated by space/newline.
 * **publish**: Execute publish of all items remaining in publish queue without
   connecting to network. May not publish last checkpoint if last closed ledger
   is on checkpoint boundary.
@@ -85,7 +85,7 @@ Command options can only by placed after command.
   envelope stored in binary format in <FILE-NAME>, and send the result to
   standard output (which should be redirected to a file or piped through a tool
   such as `base64`).  The private signing key is read from standard input,
-  unless <FILE-NAME> is "/dev/stdin" in which case the transaction envelope is read from
+  unless <FILE-NAME> is "stdin" in which case the transaction envelope is read from
   standard input and the signing key is read from `/dev/tty`.  In either event,
   if the signing key appears to be coming from a terminal, stellar-core
   disables echo. Note that if you do not have a STELLAR_NETWORK_ID environment
@@ -276,13 +276,23 @@ format.
 
 ### The following HTTP commands are exposed on test instances
 * **generateload**
-  `generateload[?mode=(create|pay)&accounts=N&offset=K&txs=M&txrate=R&batchsize=L&spikesize=S&spikeinterval=I]`<br>
+  `generateload[?mode=(create|pay|pretend)&accounts=N&offset=K&txs=M&txrate=R&batchsize=L&spikesize=S&spikeinterval=I]`<br>
   Artificially generate load for testing; must be used with
-  `ARTIFICIALLY_GENERATE_LOAD_FOR_TESTING` set to true. Depending on the mode,
-  either creates new accounts or generates payments on accounts specified
-  (where number of accounts can be offset). Additionally, allows batching up to
-  100 account creations per transaction via 'batchsize'.
-  When a nonzero I is given, a spike will occur every I seconds injecting S transactions on top of `txrate`.
+  `ARTIFICIALLY_GENERATE_LOAD_FOR_TESTING` set to true.
+  * `create` mode creates new accounts.
+    Additionally, allows batching up to 100 account creations per transaction via 'batchsize'.
+  * `pay` mode generates `PaymentOp` transactions on accounts specified
+    (where the number of accounts can be offset).
+  * `pretend` mode generates transactions on accounts specified
+    (where the number of accounts can be offset). Operations in `pretend` mode are
+    designed to have a realistic size to help users "pretend" that they have real traffic.
+    You can add optional configs `LOADGEN_OP_COUNT_FOR_TESTING` and
+    `LOADGEN_OP_COUNT_DISTRIBUTION_FOR_TESTING` in the config file to specify
+    the # of ops / tx and how often they appear. More specifically, the probability
+    that a transaction contains `COUNT[i]` ops is
+    `DISTRIBUTION[i] / (DISTRIBUTION[0] + DISTRIBUTION[1] + ...)`.
+
+  For `pay` and `pretend`, when a nonzero I is given, a spike will occur every I seconds injecting S transactions on top of `txrate`.
 
 * **manualclose**
   If MANUAL_CLOSE is set to true in the .cfg file, this will cause the current

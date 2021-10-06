@@ -15,6 +15,8 @@
 #include "transactions/CreatePassiveSellOfferOpFrame.h"
 #include "transactions/EndSponsoringFutureReservesOpFrame.h"
 #include "transactions/InflationOpFrame.h"
+#include "transactions/LiquidityPoolDepositOpFrame.h"
+#include "transactions/LiquidityPoolWithdrawOpFrame.h"
 #include "transactions/ManageBuyOfferOpFrame.h"
 #include "transactions/ManageDataOpFrame.h"
 #include "transactions/ManageSellOfferOpFrame.h"
@@ -74,7 +76,7 @@ OperationFrame::makeHelper(Operation const& op, OperationResult& res,
     case CHANGE_TRUST:
         return std::make_shared<ChangeTrustOpFrame>(op, res, tx);
     case ALLOW_TRUST:
-        return std::make_shared<AllowTrustOpFrame>(op, res, tx);
+        return std::make_shared<AllowTrustOpFrame>(op, res, tx, index);
     case ACCOUNT_MERGE:
         return std::make_shared<MergeOpFrame>(op, res, tx);
     case INFLATION:
@@ -105,7 +107,11 @@ OperationFrame::makeHelper(Operation const& op, OperationResult& res,
     case CLAWBACK_CLAIMABLE_BALANCE:
         return std::make_shared<ClawbackClaimableBalanceOpFrame>(op, res, tx);
     case SET_TRUST_LINE_FLAGS:
-        return std::make_shared<SetTrustLineFlagsOpFrame>(op, res, tx);
+        return std::make_shared<SetTrustLineFlagsOpFrame>(op, res, tx, index);
+    case LIQUIDITY_POOL_DEPOSIT:
+        return std::make_shared<LiquidityPoolDepositOpFrame>(op, res, tx);
+    case LIQUIDITY_POOL_WITHDRAW:
+        return std::make_shared<LiquidityPoolWithdrawOpFrame>(op, res, tx);
     default:
         ostringstream err;
         err << "Unknown Tx type: " << op.body.type();
@@ -127,7 +133,7 @@ OperationFrame::apply(SignatureChecker& signatureChecker,
     ZoneScoped;
     bool res;
     CLOG_TRACE(Tx, "{}", xdr_to_string(mOperation, "Operation"));
-    res = checkValid(signatureChecker, ltx, CheckType::FOR_APPLY);
+    res = checkValid(signatureChecker, ltx, true);
     if (res)
     {
         res = doApply(ltx);
@@ -143,7 +149,8 @@ OperationFrame::getThresholdLevel() const
     return ThresholdLevel::MEDIUM;
 }
 
-bool OperationFrame::isVersionSupported(uint32_t) const
+bool
+OperationFrame::isOpSupported(LedgerHeader const&) const
 {
     return true;
 }
@@ -204,28 +211,23 @@ OperationFrame::getResultCode() const
 // verifies that the operation is well formed (operation specific)
 bool
 OperationFrame::checkValid(SignatureChecker& signatureChecker,
-                           AbstractLedgerTxn& ltxOuter, CheckType checkType)
+                           AbstractLedgerTxn& ltxOuter, bool forApply)
 {
     ZoneScoped;
     // Note: ltx is always rolled back so checkValid never modifies the ledger
     LedgerTxn ltx(ltxOuter);
-    auto ledgerVersion = ltx.loadHeader().current().ledgerVersion;
-    if (!isVersionSupported(ledgerVersion))
+    if (!isOpSupported(ltx.loadHeader().current()))
     {
         mResult.code(opNOT_SUPPORTED);
         return false;
     }
 
-    bool const forApply = checkType == CheckType::FOR_APPLY;
-
+    auto ledgerVersion = ltx.loadHeader().current().ledgerVersion;
     if (!forApply || ledgerVersion < 10)
     {
-        if (checkType != CheckType::FOR_VALIDITY_PARTIAL)
+        if (!checkSignature(signatureChecker, ltx, forApply))
         {
-            if (!checkSignature(signatureChecker, ltx, forApply))
-            {
-                return false;
-            }
+            return false;
         }
     }
     else
