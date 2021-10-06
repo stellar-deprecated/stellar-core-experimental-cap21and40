@@ -47,11 +47,8 @@ LedgerEntryExtensionV1& prepareLedgerEntryExtensionV1(LedgerEntry& le);
 void setLedgerHeaderFlag(LedgerHeader& lh, uint32_t flags);
 
 AccountEntryExtensionV2& getAccountEntryExtensionV2(AccountEntry& ae);
-<<<<<<< HEAD
 AccountEntryExtensionV3& getAccountEntryExtensionV3(AccountEntry& ae);
-=======
 TrustLineEntryExtensionV2& getTrustLineEntryExtensionV2(TrustLineEntry& le);
->>>>>>> 5bec96c4c9d7080802e80a2e93ddc0bd6bd8a98d
 LedgerEntryExtensionV1& getLedgerEntryExtensionV1(LedgerEntry& le);
 
 LedgerKey accountKey(AccountID const& accountID);
@@ -240,11 +237,8 @@ bool hasMuxedAccount(TransactionEnvelope const& e);
 uint64_t getUpperBoundCloseTimeOffset(Application& app, uint64_t lastCloseTime);
 
 bool hasAccountEntryExtV2(AccountEntry const& ae);
-<<<<<<< HEAD
 bool hasAccountEntryExtV3(AccountEntry const& ae);
-=======
 bool hasTrustLineEntryExtV2(TrustLineEntry const& tl);
->>>>>>> 5bec96c4c9d7080802e80a2e93ddc0bd6bd8a98d
 
 Asset getAsset(AccountID const& issuer, AssetCode const& assetCode);
 
