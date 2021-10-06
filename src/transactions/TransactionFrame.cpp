@@ -439,7 +439,6 @@ TransactionFrame::isTooLate(LedgerTxnHeader const& header,
 }
 
 bool
-<<<<<<< HEAD
 TransactionFrame::isTooEarlyForAccount(AccountEntry sourceAccount,
                                        LedgerTxnHeader const& header,
                                        uint64_t lowerBoundCloseTimeOffset)
@@ -482,15 +481,9 @@ TransactionFrame::isTooEarlyForAccount(AccountEntry sourceAccount,
 }
 
 bool
-TransactionFrame::commonValidPreSourceAccountLoad(
-    SignatureChecker& signatureChecker, LedgerTxnHeader const& header,
-    bool chargeFee, uint64_t lowerBoundCloseTimeOffset,
-    uint64_t upperBoundCloseTimeOffset)
-=======
 TransactionFrame::commonValidPreSeqNum(AbstractLedgerTxn& ltx, bool chargeFee,
                                        uint64_t lowerBoundCloseTimeOffset,
                                        uint64_t upperBoundCloseTimeOffset)
->>>>>>> 5bec96c4c9d7080802e80a2e93ddc0bd6bd8a98d
 {
     ZoneScoped;
     // this function does validations that are independent of the account state
@@ -532,7 +525,7 @@ TransactionFrame::commonValidPreSeqNum(AbstractLedgerTxn& ltx, bool chargeFee,
         getResult().result.code(txINSUFFICIENT_FEE);
         return false;
     }
-<<<<<<< HEAD
+
     auto extraSigners = getExtraSigners();
     for (size_t i = 0; i < extraSigners.size(); i++)
     {
@@ -542,15 +535,6 @@ TransactionFrame::commonValidPreSeqNum(AbstractLedgerTxn& ltx, bool chargeFee,
             return false;
         }
     }
-=======
-
-    if (!loadSourceAccount(ltx, header))
-    {
-        getResult().result.code(txNO_ACCOUNT);
-        return false;
-    }
-
->>>>>>> 5bec96c4c9d7080802e80a2e93ddc0bd6bd8a98d
     return true;
 }
 
