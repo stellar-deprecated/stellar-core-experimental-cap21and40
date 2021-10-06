@@ -75,17 +75,9 @@ class TransactionFrame : public TransactionFrameBase
                                       LedgerTxnHeader const& header,
                                       uint64_t lowerBoundCloseTimeOffset);
 
-<<<<<<< HEAD
-    bool commonValidPreSourceAccountLoad(SignatureChecker& signatureChecker,
-                                         LedgerTxnHeader const& header,
-                                         bool chargeFee,
-                                         uint64_t lowerBoundCloseTimeOffset,
-                                         uint64_t upperBoundCloseTimeOffset);
-=======
     bool commonValidPreSeqNum(AbstractLedgerTxn& ltx, bool chargeFee,
                               uint64_t lowerBoundCloseTimeOffset,
                               uint64_t upperBoundCloseTimeOffset);
->>>>>>> 5bec96c4c9d7080802e80a2e93ddc0bd6bd8a98d
 
     virtual bool isBadSeq(LedgerTxnHeader const& header, int64_t seqNum) const;
 
