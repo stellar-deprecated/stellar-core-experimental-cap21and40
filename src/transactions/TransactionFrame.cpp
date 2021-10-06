@@ -662,16 +662,8 @@ TransactionFrame::commonValid(SignatureChecker& signatureChecker,
             "Applying transaction with non-current closeTime");
     }
 
-<<<<<<< HEAD
-    auto header = ltx.loadHeader();
-
-    if (!commonValidPreSourceAccountLoad(signatureChecker, header, chargeFee,
-                                         lowerBoundCloseTimeOffset,
-                                         upperBoundCloseTimeOffset))
-=======
     if (!commonValidPreSeqNum(ltx, chargeFee, lowerBoundCloseTimeOffset,
                               upperBoundCloseTimeOffset))
->>>>>>> 5bec96c4c9d7080802e80a2e93ddc0bd6bd8a98d
     {
         return res;
     }
@@ -679,31 +671,6 @@ TransactionFrame::commonValid(SignatureChecker& signatureChecker,
     auto header = ltx.loadHeader();
     auto sourceAccount = loadSourceAccount(ltx, header);
 
-<<<<<<< HEAD
-    if (!sourceAccount)
-    {
-        getResult().result.code(txNO_ACCOUNT);
-        return res;
-    }
-
-    // TODO: Answer the question, does these validations belong here? This
-    // function has a comment stating that the validations within are
-    // independent of account state. This validation is clearly dependent on
-    // account state, but then again, the validation immediately above is also
-    // dependent on account state, so it is unclear how meaningful that comment
-    // is. If this code doesn't belong here maybe it belongs in commonValid. The
-    // thing I like about putting it here though is that this check much occur
-    // prior to sequence number update and must circumvent it, so from a
-    // conceptual point-of-view it seems to belong here.
-    if (isTooEarlyForAccount(sourceAccount.current().data.account(), header,
-                             lowerBoundCloseTimeOffset))
-    {
-        getResult().result.code(txTOO_EARLY);
-        return res;
-    }
-
-=======
->>>>>>> 5bec96c4c9d7080802e80a2e93ddc0bd6bd8a98d
     // in older versions, the account's sequence number is updated when taking
     // fees
     if (header.current().ledgerVersion >= 10 || !applying)
