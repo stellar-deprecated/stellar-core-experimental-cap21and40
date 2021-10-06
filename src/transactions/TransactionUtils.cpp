@@ -152,7 +152,6 @@ getAccountEntryExtensionV2(AccountEntry& ae)
     return ae.ext.v1().ext.v2();
 }
 
-<<<<<<< HEAD
 AccountEntryExtensionV3&
 getAccountEntryExtensionV3(AccountEntry& ae)
 {
@@ -162,7 +161,8 @@ getAccountEntryExtensionV3(AccountEntry& ae)
         throw std::runtime_error("expected AccountEntry extension V3");
     }
     return ae.ext.v1().ext.v2().ext.v3();
-=======
+}
+
 TrustLineEntryExtensionV2&
 getTrustLineEntryExtensionV2(TrustLineEntry& tl)
 {
@@ -172,7 +172,6 @@ getTrustLineEntryExtensionV2(TrustLineEntry& tl)
     }
 
     return tl.ext.v1().ext.v2();
->>>>>>> 5bec96c4c9d7080802e80a2e93ddc0bd6bd8a98d
 }
 
 LedgerEntryExtensionV1&
@@ -1203,16 +1202,16 @@ hasAccountEntryExtV2(AccountEntry const& ae)
 }
 
 bool
-<<<<<<< HEAD
 hasAccountEntryExtV3(AccountEntry const& ae)
 {
     return ae.ext.v() == 1 && ae.ext.v1().ext.v() == 2 &&
            ae.ext.v1().ext.v2().ext.v() == 3;
-=======
+}
+
+bool
 hasTrustLineEntryExtV2(TrustLineEntry const& tl)
 {
     return tl.ext.v() == 1 && tl.ext.v1().ext.v() == 2;
->>>>>>> 5bec96c4c9d7080802e80a2e93ddc0bd6bd8a98d
 }
 
 Asset
