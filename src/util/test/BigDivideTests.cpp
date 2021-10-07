@@ -379,7 +379,7 @@ TEST_CASE("bigSquareRoot tests", "[bigdivide]")
     roots.emplace_back(0);
     for (uint64_t i = 1; i <= 10; ++i)
     {
-        for (uint64_t j = 1; j <= 2 * i - 1; ++j)
+        for (uint64_t j = 1; j <= 2 * i + 1; ++j)
         {
             roots.emplace_back(i);
         }
@@ -393,15 +393,105 @@ TEST_CASE("bigSquareRoot tests", "[bigdivide]")
     }
 
     // Test large values
-    REQUIRE(bigSquareRoot(UINT64_MAX, 1) == 1ull << 32);
-    REQUIRE(bigSquareRoot(UINT32_MAX, 1) == 1ull << 16);
+    REQUIRE(bigSquareRoot(UINT64_MAX, 1) == (1ull << 32) - 1);
+    REQUIRE(bigSquareRoot(UINT32_MAX, 1) == (1ull << 16) - 1);
     REQUIRE(bigSquareRoot(UINT64_MAX, UINT64_MAX) == UINT64_MAX);
     REQUIRE(bigSquareRoot(UINT32_MAX, UINT32_MAX) == UINT32_MAX);
 
     // UINT64_MAX * UINT32_MAX = ((1 << 32) + 1) * UINT32_MAX * UINT32_MAX
     // but
-    // ceil(sqrt(UINT64_MAX * UINT32_MAX)) != ((1 << 16) + 1) * UINT32_MAX
-    // because the ceil occurs after the multiplication
-    REQUIRE(bigSquareRoot(UINT64_MAX, UINT32_MAX) == 281474976677888);
-    REQUIRE(((1ull << 16) + 1) * ((1ull << 32) - 1) != 281474976677888);
+    // floor(sqrt(UINT64_MAX * UINT32_MAX)) != (1 << 16) * UINT32_MAX
+    // because the floor occurs after the multiplication
+    REQUIRE(bigSquareRoot(UINT64_MAX, UINT32_MAX) == 281474976677887);
+    REQUIRE((1ull << 16) * ((1ull << 32) - 1) != 281474976677887);
+}
+
+TEST_CASE("huge divide", "[bigdivide]")
+{
+    // For parameters that are in range for both bigDivide and hugeDivide, they
+    // must produce the same answer
+    SECTION("huge divide matches big divide")
+    {
+        std::vector<int32_t> values32;
+        std::vector<int64_t> values64;
+        for (size_t i = 0; i < 10; ++i)
+        {
+            values32.emplace_back(static_cast<int>(i));
+            values32.emplace_back(static_cast<int>(INT32_MAX - i));
+            values64.emplace_back(i);
+            values64.emplace_back(INT32_MAX - i);
+            values64.emplace_back(INT64_MAX - i);
+        }
+
+        auto checkBigHuge = [](int32_t a, uint64_t b, uint64_t c,
+                               Rounding round) {
+            int64_t big = 0;
+            bool bigRes = bigDivide(big, a, b, c, round);
+
+            int64_t huge = 0;
+            bool hugeRes = hugeDivide(huge, a, b, c, round);
+
+            REQUIRE(bigRes == hugeRes);
+            if (bigRes)
+            {
+                REQUIRE(big == huge);
+            }
+        };
+        for (int32_t a : values32)
+        {
+            for (uint64_t b : values64)
+            {
+                for (uint64_t c : values64)
+                {
+                    if (c != 0)
+                    {
+                        checkBigHuge(a, b, c, ROUND_UP);
+                        checkBigHuge(a, b, c, ROUND_DOWN);
+                    }
+                }
+            }
+        }
+    }
+
+    SECTION("uint128 values")
+    {
+        uint128_t const UINT128_MAX(UINT64_MAX, UINT64_MAX);
+        uint128_t maxC =
+            uint128_t((uint32_t)INT32_MAX) * uint128_t((uint64_t)INT64_MAX);
+
+        auto checkHuge = [](int64_t expected, int32_t a, uint128_t b,
+                            uint128_t c, Rounding rounding) {
+            int64_t huge = 0;
+            REQUIRE(hugeDivide(huge, a, b, c, rounding));
+            REQUIRE(huge == expected);
+        };
+
+        auto checkHugeFail = [](int32_t a, uint128_t b, uint128_t c,
+                                Rounding rounding) {
+            int64_t huge = 0;
+            REQUIRE(!hugeDivide(huge, a, b, c, rounding));
+        };
+
+        // B is max
+        checkHugeFail(1, UINT128_MAX, 1u, ROUND_DOWN);
+        checkHugeFail(1, UINT128_MAX, 1u, ROUND_UP);
+        checkHuge(INT64_MAX, 1, UINT128_MAX, uint128_t(1u) << 65u, ROUND_DOWN);
+        checkHugeFail(1, UINT128_MAX, uint128_t(1u) << 65u, ROUND_UP);
+
+        // C is max
+        checkHuge(0, 1, 1u, maxC, ROUND_DOWN);
+        checkHuge(1, 1, 1u, maxC, ROUND_UP);
+        checkHuge(1, INT32_MAX, (uint64_t)INT64_MAX, maxC, ROUND_DOWN);
+        checkHuge(1, INT32_MAX, (uint64_t)INT64_MAX, maxC, ROUND_UP);
+
+        // B and C are max
+        checkHuge(17179869192, 1, UINT128_MAX, maxC, ROUND_DOWN);
+        checkHuge(17179869193, 1, UINT128_MAX, maxC, ROUND_UP);
+        checkHuge(9223372023969873914, (1 << 29) - 1, UINT128_MAX, maxC,
+                  ROUND_DOWN);
+        checkHuge(9223372023969873915, (1 << 29) - 1, UINT128_MAX, maxC,
+                  ROUND_UP);
+        checkHugeFail(1 << 29, UINT128_MAX, maxC, ROUND_DOWN);
+        checkHugeFail(1 << 29, UINT128_MAX, maxC, ROUND_UP);
+    }
 }

@@ -101,6 +101,8 @@ class Config : public std::enable_shared_from_this<Config>
     void verifyHistoryValidatorsBlocking(
         std::vector<ValidatorEntry> const& validators);
 
+    void verifyLoadGenOpCountForTestingConfigs();
+
     std::vector<std::chrono::microseconds> mOpApplySleepTimeForTesting;
 
   public:
@@ -195,13 +197,25 @@ class Config : public std::enable_shared_from_this<Config>
     bool ARTIFICIALLY_REPLAY_WITH_NEWEST_BUCKET_LOGIC_FOR_TESTING;
 
     // Config parameters that force transaction application during ledger
-    // close to sleep for OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING[i]
-    // microseconds OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING[i]% of the time for
-    // each i. These options are only for consensus and overlay simulation
-    // testing. These two must be used together.
+    // close to sleep for a certain amount of time.
+    // The probability that it sleeps for
+    // OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING[i] microseconds is
+    // OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING[i] divided by
+    // (OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING[0] +
+    // OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING[1] + ...) for each i. These
+    // options are only for consensus and overlay simulation testing. These two
+    // must be used together.
     std::vector<std::chrono::microseconds>
         OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING;
-    std::vector<unsigned short> OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING;
+    std::vector<uint32> OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING;
+
+    // Config parameters that LoadGen uses to decide the number of operations
+    // to include in each transaction and its distribution.
+    // The probability that transactions will contain COUNT[i] operations
+    // is DISTRIBUTION[i] / (DISTRIBUTION[0] + DISTRIBUTION[1] + ...) for each
+    // i.
+    std::vector<unsigned short> LOADGEN_OP_COUNT_FOR_TESTING;
+    std::vector<uint32> LOADGEN_OP_COUNT_DISTRIBUTION_FOR_TESTING;
 
     // A config parameter that allows a node to generate buckets. This should
     // be set to `false` only for testing purposes.
@@ -319,6 +333,7 @@ class Config : public std::enable_shared_from_this<Config>
     uint32_t TESTING_UPGRADE_DESIRED_FEE; // in stroops
     uint32_t TESTING_UPGRADE_RESERVE;     // in stroops
     uint32_t TESTING_UPGRADE_MAX_TX_SET_SIZE;
+    uint32_t TESTING_UPGRADE_FLAGS;
     unsigned short HTTP_PORT; // what port to listen for commands
     bool PUBLIC_HTTP_PORT;    // if you accept commands from not localhost
     int HTTP_MAX_CLIENT;      // maximum number of http clients, i.e backlog
@@ -453,10 +468,6 @@ class Config : public std::enable_shared_from_this<Config>
     // line arguments.
     static std::string const STDIN_SPECIAL_NAME;
 
-    std::vector<std::chrono::microseconds> const&
-    getOpApplySleepTimeForTesting() const;
-
-    std::vector<std::chrono::microseconds>
-    processOpApplySleepTimeForTestingConfigs();
+    void processOpApplySleepTimeForTestingConfigs();
 };
 }

@@ -14,6 +14,7 @@
 #include "scp/LocalNode.h"
 #include "scp/QuorumSetUtils.h"
 #include "util/Fs.h"
+#include "util/GlobalChecks.h"
 #include "util/Logging.h"
 #include "util/XDROperators.h"
 #include "util/types.h"
@@ -29,7 +30,7 @@
 
 namespace stellar
 {
-const uint32 Config::CURRENT_LEDGER_PROTOCOL_VERSION = 17
+const uint32 Config::CURRENT_LEDGER_PROTOCOL_VERSION = 18
 #ifdef ENABLE_NEXT_PROTOCOL_VERSION_UNSAFE_FOR_PRODUCTION
                                                        + 1
 #endif
@@ -46,7 +47,9 @@ static const std::unordered_set<std::string> TESTING_ONLY_OPTIONS = {
     "ARTIFICIALLY_SET_CLOSE_TIME_FOR_TESTING",
     "ARTIFICIALLY_REPLAY_WITH_NEWEST_BUCKET_LOGIC_FOR_TESTING",
     "OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING",
-    "OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING"};
+    "OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING",
+    "LOADGEN_OP_COUNT_FOR_TESTING",
+    "LOADGEN_OP_COUNT_DISTRIBUTION_FOR_TESTING"};
 
 // Options that should only be used for testing
 static const std::unordered_set<std::string> TESTING_SUGGESTED_OPTIONS = {
@@ -107,15 +110,17 @@ Config::Config() : NODE_SEED(SecretKey::random())
     MODE_AUTO_STARTS_OVERLAY = true;
     OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING =
         std::vector<std::chrono::microseconds>();
-    OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING = std::vector<unsigned short>();
+    OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING = std::vector<uint32>();
+    LOADGEN_OP_COUNT_FOR_TESTING = {};
+    LOADGEN_OP_COUNT_DISTRIBUTION_FOR_TESTING = {};
 
     FORCE_SCP = false;
     LEDGER_PROTOCOL_VERSION = CURRENT_LEDGER_PROTOCOL_VERSION;
 
     MAXIMUM_LEDGER_CLOSETIME_DRIFT = 50;
 
-    OVERLAY_PROTOCOL_MIN_VERSION = 16;
-    OVERLAY_PROTOCOL_VERSION = 17;
+    OVERLAY_PROTOCOL_MIN_VERSION = 17;
+    OVERLAY_PROTOCOL_VERSION = 18;
 
     VERSION_STR = STELLAR_CORE_VERSION;
 
@@ -126,15 +131,15 @@ Config::Config() : NODE_SEED(SecretKey::random())
     CATCHUP_RECENT = 0;
     EXPERIMENTAL_PRECAUTION_DELAY_META = false;
     // automatic maintenance settings:
-    // 11 minutes is relatively short and prime with 1 hour
-    // which will cause automatic maintenance to rarely conflict with any other
-    // scheduled tasks on a machine (that tend to run on a fixed schedule)
-    AUTOMATIC_MAINTENANCE_PERIOD = std::chrono::seconds{11 * 60};
+    // short and prime with 1 hour which will cause automatic maintenance to
+    // rarely conflict with any other scheduled tasks on a machine (that tend to
+    // run on a fixed schedule)
+    AUTOMATIC_MAINTENANCE_PERIOD = std::chrono::seconds{359};
     // count picked as to catchup with 1 month worth of ledgers
     // in about 1 week.
-    // (30*24*3600/5) / (700 - (11*60)/5 ) // number of periods
-    //   * (11*60) / (24*3600) = 6.97 days
-    AUTOMATIC_MAINTENANCE_COUNT = 700;
+    // (30*24*3600/5) / (400 - 359/5 ) // number of periods needed to catchup
+    //   * (359) / (24*3600) = 6.56 days
+    AUTOMATIC_MAINTENANCE_COUNT = 400;
     // automatic self-check happens once every 3 hours
     AUTOMATIC_SELF_CHECK_PERIOD = std::chrono::seconds{3 * 60 * 60};
     ARTIFICIALLY_GENERATE_LOAD_FOR_TESTING = false;
@@ -161,6 +166,7 @@ Config::Config() : NODE_SEED(SecretKey::random())
     TESTING_UPGRADE_DESIRED_FEE = LedgerManager::GENESIS_LEDGER_BASE_FEE;
     TESTING_UPGRADE_RESERVE = LedgerManager::GENESIS_LEDGER_BASE_RESERVE;
     TESTING_UPGRADE_MAX_TX_SET_SIZE = 50;
+    TESTING_UPGRADE_FLAGS = 0;
 
     HTTP_PORT = DEFAULT_PEER_PORT + 1;
     PUBLIC_HTTP_PORT = false;
@@ -271,6 +277,31 @@ readArray(ConfigItem const& item)
 
 template <typename T>
 T
+castInt(int64_t v, std::string const& name, T min, T max)
+{
+    if (std::is_signed_v<T>)
+    {
+        if (v < min || v > max)
+        {
+            throw std::invalid_argument(fmt::format("bad '{}'", name));
+        }
+    }
+    else if (v < 0)
+    {
+        throw std::invalid_argument(fmt::format("bad '{}'", name));
+    }
+    else
+    {
+        if (static_cast<T>(v) < min || static_cast<T>(v) > max)
+        {
+            throw std::invalid_argument(fmt::format("bad '{}'", name));
+        }
+    }
+    return static_cast<T>(v);
+}
+
+template <typename T>
+T
 readInt(ConfigItem const& item, T min = std::numeric_limits<T>::min(),
         T max = std::numeric_limits<T>::max())
 {
@@ -278,26 +309,21 @@ readInt(ConfigItem const& item, T min = std::numeric_limits<T>::min(),
     {
         throw std::invalid_argument(fmt::format("invalid '{}'", item.first));
     }
-    int64_t v = item.second->as<int64_t>()->get();
-    if (std::is_signed_v<T>)
-    {
-        if (v < min || v > max)
-        {
-            throw std::invalid_argument(fmt::format("bad '{}'", item.first));
-        }
-    }
-    else if (v < 0)
-    {
-        throw std::invalid_argument(fmt::format("bad '{}'", item.first));
-    }
-    else
-    {
-        if (static_cast<T>(v) < min || static_cast<T>(v) > max)
-        {
-            throw std::invalid_argument(fmt::format("bad '{}'", item.first));
-        }
-    }
-    return static_cast<T>(v);
+    return castInt<T>(item.second->as<int64_t>()->get(), item.first, min, max);
+}
+
+template <typename T>
+std::vector<T>
+readIntArray(ConfigItem const& item, T min = std::numeric_limits<T>::min(),
+             T max = std::numeric_limits<T>::max())
+{
+    auto resultInt64 = readArray<int64_t>(item);
+    auto result = std::vector<T>{};
+    result.reserve(resultInt64.size());
+    std::transform(
+        resultInt64.begin(), resultInt64.end(), std::back_inserter(result),
+        [&](int64_t v) { return castInt<T>(v, item.first, min, max); });
+    return result;
 }
 
 template <typename T>
@@ -309,7 +335,7 @@ readXdrEnumArray(ConfigItem const& item)
     {
         auto enumNameCharPtr =
             xdr::xdr_traits<T>::enum_name(static_cast<T>(enumVal));
-        assert(enumNameCharPtr);
+        releaseAssert(enumNameCharPtr);
         enumNames.emplace(enumNameCharPtr, static_cast<T>(enumVal));
     }
 
@@ -730,7 +756,51 @@ Config::verifyHistoryValidatorsBlocking(
     }
 }
 
-std::vector<std::chrono::microseconds>
+void
+Config::verifyLoadGenOpCountForTestingConfigs()
+{
+    if (LOADGEN_OP_COUNT_FOR_TESTING.size() !=
+        LOADGEN_OP_COUNT_DISTRIBUTION_FOR_TESTING.size())
+    {
+        throw std::invalid_argument("LOADGEN_OP_COUNT_FOR_TESTING and "
+                                    "LOADGEN_OP_COUNT_DISTRIBUTION_FOR_TESTING "
+                                    "must be defined together and "
+                                    "must have the exact same size.");
+    }
+
+    if (LOADGEN_OP_COUNT_FOR_TESTING.empty())
+    {
+        return;
+    }
+
+    if (!ARTIFICIALLY_GENERATE_LOAD_FOR_TESTING)
+    {
+        throw std::invalid_argument(
+            "When LOADGEN_OP_COUNT_FOR_TESTING and "
+            "LOADGEN_OP_COUNT_DISTRIBUTION_FOR_TESTING are defined "
+            "ARTIFICIALLY_GENERATE_LOAD_FOR_TESTING must be set true");
+    }
+
+    if (std::any_of(LOADGEN_OP_COUNT_DISTRIBUTION_FOR_TESTING.begin(),
+                    LOADGEN_OP_COUNT_DISTRIBUTION_FOR_TESTING.end(),
+                    [](unsigned short i) { return i == 0; }))
+    {
+        throw std::invalid_argument(
+            "All elements in LOADGEN_OP_COUNT_DISTRIBUTION_FOR_TESTING must be "
+            "positive integers");
+    }
+
+    if (!std::all_of(LOADGEN_OP_COUNT_FOR_TESTING.begin(),
+                     LOADGEN_OP_COUNT_FOR_TESTING.end(),
+                     [](unsigned short i) { return 1 <= i && i <= 100; }))
+    {
+        throw std::invalid_argument(
+            "All elements in LOADGEN_OP_COUNT_FOR_TESTING must be "
+            "integers in [1, 100]");
+    }
+}
+
+void
 Config::processOpApplySleepTimeForTestingConfigs()
 {
     if (OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING.size() !=
@@ -741,26 +811,30 @@ Config::processOpApplySleepTimeForTestingConfigs()
             "OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING must be defined together "
             "and have the same size");
     }
-    if (std::accumulate(OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING.begin(),
-                        OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING.end(), 0) != 100)
+
+    if (OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING.empty())
+    {
+        return;
+    }
+
+    if (std::any_of(OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING.begin(),
+                    OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING.end(),
+                    [](unsigned short i) { return i == 0; }))
     {
         throw std::invalid_argument(
-            "The sum of the weights in "
-            "OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING must equal 100");
+            "All elements in OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING must be "
+            "positive integers");
     }
-    std::vector<std::chrono::microseconds> ret;
-    ret.reserve(100);
+
+    auto sum = std::accumulate(OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING.begin(),
+                               OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING.end(), 0);
+
     for (size_t i = 0; i < OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING.size(); i++)
     {
-        LOG_INFO(DEFAULT_LOG, "Sleeps for {} {}% of the time",
+        LOG_INFO(DEFAULT_LOG, "Sleeps for {} roughly {}% of the time",
                  OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING[i],
-                 OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING[i]);
-        for (size_t j = 0; j < OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING[i]; j++)
-        {
-            ret.push_back(OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING[i]);
-        }
+                 100 * OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING[i] / sum);
     }
-    return ret;
 }
 
 void
@@ -1004,7 +1078,7 @@ Config::processConfig(std::shared_ptr<cpptoml::table> t)
             }
             else if (item.first == "FLOOD_TX_PERIOD_MS")
             {
-                FLOOD_TX_PERIOD_MS = readInt<int>(item, 0);
+                FLOOD_TX_PERIOD_MS = readInt<int>(item, 1);
             }
             else if (item.first == "PREFERRED_PEERS")
             {
@@ -1141,24 +1215,31 @@ Config::processConfig(std::shared_ptr<cpptoml::table> t)
             }
             else if (item.first == "OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING")
             {
-                auto input = readArray<int64_t>(item);
+                // Since it doesn't make sense to sleep for a negative amount of
+                // time, we use an unsigned integer type.
+                auto input = readIntArray<uint32>(item);
                 OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING.reserve(input.size());
-                // Convert int64_t to std::chrono::microseconds
+                // Convert uint32 to std::chrono::microseconds
                 std::transform(
                     input.begin(), input.end(),
                     std::back_inserter(
                         OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING),
-                    [](int64_t x) { return std::chrono::microseconds(x); });
+                    [](uint32 x) { return std::chrono::microseconds(x); });
             }
             else if (item.first == "OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING")
             {
-                auto input = readArray<int64_t>(item);
-                OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING.reserve(input.size());
-                // Convert int64_t to unsigned short
-                std::transform(
-                    input.begin(), input.end(),
-                    std::back_inserter(OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING),
-                    [](int64_t x) { return static_cast<unsigned short>(x); });
+                OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING =
+                    readIntArray<uint32>(item);
+            }
+            else if (item.first == "LOADGEN_OP_COUNT_FOR_TESTING")
+            {
+                LOADGEN_OP_COUNT_FOR_TESTING =
+                    readIntArray<unsigned short>(item);
+            }
+            else if (item.first == "LOADGEN_OP_COUNT_DISTRIBUTION_FOR_TESTING")
+            {
+                LOADGEN_OP_COUNT_DISTRIBUTION_FOR_TESTING =
+                    readIntArray<uint32>(item);
             }
             else
             {
@@ -1172,9 +1253,10 @@ Config::processConfig(std::shared_ptr<cpptoml::table> t)
         if (!OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING.empty() ||
             !OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING.empty())
         {
-            mOpApplySleepTimeForTesting =
-                processOpApplySleepTimeForTestingConfigs();
+            processOpApplySleepTimeForTestingConfigs();
         }
+
+        verifyLoadGenOpCountForTestingConfigs();
 
         gIsProductionNetwork = NETWORK_PASSPHRASE ==
                                "Public Global Stellar Network ; September 2015";
@@ -1792,12 +1874,5 @@ Config::toString(SCPQuorumSet const& qset)
     return fw.write(json);
 }
 
-std::vector<std::chrono::microseconds> const&
-Config::getOpApplySleepTimeForTesting() const
-{
-    return mOpApplySleepTimeForTesting;
-}
-
-std::string const Config::STDIN_SPECIAL_NAME = "/dev/stdin";
-
+std::string const Config::STDIN_SPECIAL_NAME = "stdin";
 }

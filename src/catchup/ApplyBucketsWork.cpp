@@ -16,6 +16,7 @@
 #include "ledger/LedgerTxn.h"
 #include "main/Application.h"
 #include "transactions/TransactionUtils.h"
+#include "util/GlobalChecks.h"
 #include <Tracy.hpp>
 #include <fmt/format.h>
 #include <medida/meter.h>
@@ -69,7 +70,7 @@ ApplyBucketsWork::getBucket(std::string const& hash)
     auto b = (i != mBuckets.end())
                  ? i->second
                  : mApp.getBucketManager().getBucketByHash(hexToBin256(hash));
-    assert(b);
+    releaseAssert(b);
     return b;
 }
 
@@ -118,6 +119,15 @@ ApplyBucketsWork::onReset()
             addBucket(getBucket(hsb.snap));
             addBucket(getBucket(hsb.curr));
         }
+        // estimate the number of ledger entries contained in those buckets
+        // use accounts as a rough approximator as to overestimate a bit
+        // (default BucketEntry contains a default AccountEntry)
+        size_t const estimatedLedgerEntrySize =
+            xdr::xdr_traits<BucketEntry>::serial_size(BucketEntry{});
+        size_t const totalLECount = mTotalSize / estimatedLedgerEntrySize;
+        CLOG_INFO(History, "ApplyBuckets estimated {} ledger entries",
+                  totalLECount);
+        mApp.getLedgerTxnRoot().prepareNewObjects(totalLECount);
     }
 
     mLevel = BucketList::kNumLevels - 1;
@@ -133,7 +143,7 @@ void
 ApplyBucketsWork::startLevel()
 {
     ZoneScoped;
-    assert(isLevelComplete());
+    releaseAssert(isLevelComplete());
 
     CLOG_DEBUG(History, "ApplyBuckets : starting level {}", mLevel);
     auto& level = getBucketLevel(mLevel);
@@ -228,8 +238,8 @@ ApplyBucketsWork::advance(std::string const& bucketName,
                           BucketApplicator& applicator)
 {
     ZoneScoped;
-    assert(applicator);
-    assert(mTotalSize != 0);
+    releaseAssert(applicator);
+    releaseAssert(mTotalSize != 0);
     auto sz = applicator.advance(mCounters);
     mAppliedEntries += sz;
     mCounters.logDebug(bucketName, mLevel, mApp.getClock().now());

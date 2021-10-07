@@ -45,8 +45,9 @@ class OperationFrame
     // returns the threshold this operation requires
     virtual ThresholdLevel getThresholdLevel() const;
 
-    // returns true if the operation is supported given a protocol version
-    virtual bool isVersionSupported(uint32_t protocolVersion) const;
+    // returns true if the operation is supported given a protocol version and
+    // header flags
+    virtual bool isOpSupported(LedgerHeader const& header) const;
 
     LedgerTxnEntry loadSourceAccount(AbstractLedgerTxn& ltx,
                                      LedgerTxnHeader const& header);
@@ -77,12 +78,8 @@ class OperationFrame
     }
     OperationResultCode getResultCode() const;
 
-    // If "checkType" is FOR_VALIDITY_PARTIAL, then while a "false" return
-    // guarantees that the transaction is invalid, a "true" return does not
-    // guarantee that the transaction is valid.  In particular, a "partial"
-    // check does not check signatures or load accounts.
     bool checkValid(SignatureChecker& signatureChecker,
-                    AbstractLedgerTxn& ltxOuter, CheckType checkType);
+                    AbstractLedgerTxn& ltxOuter, bool forApply);
 
     bool apply(SignatureChecker& signatureChecker, AbstractLedgerTxn& ltx);
 

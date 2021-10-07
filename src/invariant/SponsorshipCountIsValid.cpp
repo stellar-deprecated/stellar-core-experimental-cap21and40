@@ -7,6 +7,7 @@
 #include "ledger/LedgerTxn.h"
 #include "main/Application.h"
 #include "transactions/TransactionUtils.h"
+#include "util/GlobalChecks.h"
 #include "util/UnorderedMap.h"
 #include <fmt/format.h>
 
@@ -38,6 +39,8 @@ getMult(LedgerEntry const& le)
     case ACCOUNT:
         return 2;
     case TRUSTLINE:
+        return le.data.trustLine().asset.type() == ASSET_TYPE_POOL_SHARE ? 2
+                                                                         : 1;
     case OFFER:
     case DATA:
         return 1;
@@ -136,8 +139,8 @@ getDeltaSponsoringAndSponsored(std::shared_ptr<InternalLedgerEntry const> le,
 {
     if (le)
     {
-        assert(le->type() == InternalLedgerEntryType::LEDGER_ENTRY &&
-               le->ledgerEntry().data.type() == ACCOUNT);
+        releaseAssert(le->type() == InternalLedgerEntryType::LEDGER_ENTRY &&
+                      le->ledgerEntry().data.type() == ACCOUNT);
         auto const& ae = le->ledgerEntry().data.account();
         if (hasAccountEntryExtV2(ae))
         {

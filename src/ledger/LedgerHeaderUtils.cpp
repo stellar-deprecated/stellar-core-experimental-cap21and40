@@ -8,20 +8,27 @@
 #include "database/Database.h"
 #include "database/DatabaseUtils.h"
 #include "util/Decoder.h"
+#include "util/GlobalChecks.h"
+#include "util/Logging.h"
 #include "util/XDRStream.h"
 #include "util/types.h"
 #include "xdrpp/marshal.h"
+
 #include <Tracy.hpp>
 #include <fmt/format.h>
 #include <util/basen.h>
-
-#include "util/Logging.h"
 
 namespace stellar
 {
 
 namespace LedgerHeaderUtils
 {
+
+uint32_t
+getFlags(LedgerHeader const& lh)
+{
+    return lh.ext.v() == 1 ? lh.ext.v1().flags : 0;
+}
 
 bool
 isValid(LedgerHeader const& lh)
@@ -182,7 +189,7 @@ copyToStream(Database& db, soci::session& sess, uint32_t ledgerSeq,
 {
     ZoneScoped;
     uint32_t begin = ledgerSeq, end = ledgerSeq + ledgerCount;
-    assert(begin <= end);
+    releaseAssert(begin <= end);
 
     std::string headerEncoded;
 

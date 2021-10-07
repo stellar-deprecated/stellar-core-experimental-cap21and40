@@ -76,43 +76,14 @@ bool applyCheck(TransactionFramePtr tx, Application& app,
                 bool checkSeqNum = true);
 void applyTx(TransactionFramePtr const& tx, Application& app,
              bool checkSeqNum = true);
-
-enum class ValidateTxResultsType
-{
-    VALIDATE_CONSISTENCY_ONLY,
-    VALIDATE_BOTH_FAIL,
-    VALIDATE_BOTH_PASS,
-    VALIDATE_ONLY_FULL_CHECK_FAILS
-};
-
 void validateTxResults(TransactionFramePtr const& tx, Application& app,
                        ValidationResult validationResult,
-                       TransactionResult const& applyResult = {},
-                       ValidateTxResultsType validateType =
-                           ValidateTxResultsType::VALIDATE_CONSISTENCY_ONLY);
+                       TransactionResult const& applyResult = {});
 
-bool checkValid(TransactionFrameBasePtr tx, AbstractLedgerTxn& ltx,
-                SequenceNumber current = 0,
-                uint64_t lowerBoundCloseTimeOffset = 0,
-                uint64_t upperBoundCloseTimeOffset = 0, bool fullCheck = true);
-
-void requireOnlyFullCheckFails(TransactionFrameBasePtr tx,
-                               AbstractLedgerTxn& ltx,
-                               SequenceNumber current = 0,
-                               uint64_t lowerBoundCloseTimeOffset = 0,
-                               uint64_t upperBoundCloseTimeOffset = 0);
-
-void requireCheckValidFormsBothFail(TransactionFrameBasePtr tx,
-                                    AbstractLedgerTxn& ltx,
-                                    SequenceNumber current = 0,
-                                    uint64_t lowerBoundCloseTimeOffset = 0,
-                                    uint64_t upperBoundCloseTimeOffset = 0);
-
-void requireCheckValidFormsBothPass(TransactionFrameBasePtr tx,
-                                    AbstractLedgerTxn& ltx,
-                                    SequenceNumber current = 0,
-                                    uint64_t lowerBoundCloseTimeOffset = 0,
-                                    uint64_t upperBoundCloseTimeOffset = 0);
+void checkLiquidityPool(Application& app, PoolID const& poolID,
+                        int64_t reserveA, int64_t reserveB,
+                        int64_t totalPoolShares,
+                        int64_t poolSharesTrustLineCount);
 
 TxSetResultMeta
 closeLedgerOn(Application& app, uint32 ledgerSeq, time_t closeTime,
@@ -252,6 +223,12 @@ Operation revokeSponsorship(AccountID const& accID, SignerKey const& key);
 Operation clawback(AccountID const& from, Asset const& asset, int64_t amount);
 Operation clawbackClaimableBalance(ClaimableBalanceID const& balanceID);
 
+Operation liquidityPoolDeposit(PoolID const& poolID, int64_t maxAmountA,
+                               int64_t maxAmountB, Price const& minPrice,
+                               Price const& maxPrice);
+Operation liquidityPoolWithdraw(PoolID const& poolID, int64_t amount,
+                                int64_t minAmountA, int64_t minAmountB);
+
 Asset makeNativeAsset();
 Asset makeInvalidAsset();
 Asset makeAsset(SecretKey const& issuer, std::string const& code);
@@ -274,5 +251,19 @@ TransactionFrameBasePtr
 transactionFrameFromOps(Hash const& networkID, TestAccount& source,
                         std::vector<Operation> const& ops,
                         std::vector<SecretKey> const& opKeys);
+
+LedgerUpgrade makeBaseReserveUpgrade(int baseReserve);
+
+UpgradeType toUpgradeType(LedgerUpgrade const& upgrade);
+
+LedgerHeader executeUpgrades(Application& app,
+                             xdr::xvector<UpgradeType, 6> const& upgrades);
+
+LedgerHeader executeUpgrade(Application& app, LedgerUpgrade const& lupgrade);
+
+void
+depositTradeWithdrawTest(Application& app, TestAccount& root, int depositSize,
+                         std::vector<std::pair<bool, int64_t>> const& trades);
+
 } // end txtest namespace
 }

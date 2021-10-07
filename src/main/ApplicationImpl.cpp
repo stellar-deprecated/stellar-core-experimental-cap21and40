@@ -32,6 +32,7 @@
 #include "invariant/SponsorshipCountIsValid.h"
 #include "ledger/InMemoryLedgerTxn.h"
 #include "ledger/InMemoryLedgerTxnRoot.h"
+#include "ledger/LedgerHeaderUtils.h"
 #include "ledger/LedgerManager.h"
 #include "ledger/LedgerTxn.h"
 #include "main/ApplicationUtils.h"
@@ -433,6 +434,13 @@ ApplicationImpl::getJsonInfo()
     info["ledger"]["baseFee"] = lcl.header.baseFee;
     info["ledger"]["baseReserve"] = lcl.header.baseReserve;
     info["ledger"]["maxTxSetSize"] = lcl.header.maxTxSetSize;
+
+    auto currentHeaderFlags = LedgerHeaderUtils::getFlags(lcl.header);
+    if (currentHeaderFlags != 0)
+    {
+        info["ledger"]["flags"] = currentHeaderFlags;
+    }
+
     info["ledger"]["age"] = (int)lm.secondsSinceLastLedgerClose();
     info["peers"]["pending_count"] = getOverlayManager().getPendingPeersCount();
     info["peers"]["authenticated_count"] =
@@ -452,11 +460,16 @@ ApplicationImpl::getJsonInfo()
 
     // Try to get quorum set info for the previous ledger closed by the
     // network.
-    if (herder.getCurrentLedgerSeq() > 1)
+    auto ledgerSeq = lcl.header.ledgerSeq;
+    if (herder.getState() != Herder::HERDER_BOOTING_STATE)
     {
-        quorumInfo =
-            herder.getJsonQuorumInfo(getConfig().NODE_SEED.getPublicKey(), true,
-                                     false, herder.getCurrentLedgerSeq() - 1);
+        ledgerSeq = herder.trackingConsensusLedgerIndex();
+    }
+
+    if (ledgerSeq > 1)
+    {
+        quorumInfo = herder.getJsonQuorumInfo(
+            getConfig().NODE_SEED.getPublicKey(), true, false, ledgerSeq - 1);
     }
 
     // If the quorum set info for the previous ledger is missing, use the
@@ -464,9 +477,8 @@ ApplicationImpl::getJsonInfo()
     auto qset = quorumInfo.get("qset", "");
     if (quorumInfo.empty() || qset.empty())
     {
-        quorumInfo =
-            herder.getJsonQuorumInfo(getConfig().NODE_SEED.getPublicKey(), true,
-                                     false, herder.getCurrentLedgerSeq());
+        quorumInfo = herder.getJsonQuorumInfo(
+            getConfig().NODE_SEED.getPublicKey(), true, false, ledgerSeq);
     }
 
     auto invariantFailures = getInvariantManager().getJsonInfo();
@@ -678,7 +690,7 @@ ApplicationImpl::start()
         }
 
         // restores Herder's state before starting overlay
-        mHerder->restoreState();
+        mHerder->start();
         // set known cursors before starting maintenance job
         ExternalQueue ps(*this);
         ps.setInitialCursors(mConfig.KNOWN_CURSORS);
@@ -724,6 +736,7 @@ ApplicationImpl::gracefulStop()
     {
         mOverlayManager->shutdown();
     }
+    mSelfCheckTimer.cancel();
     shutdownWorkScheduler();
     if (mProcessManager)
     {
@@ -993,14 +1006,14 @@ ApplicationImpl::advanceToLedgerBeforeManualCloseTarget(
 
 #ifdef BUILD_TESTS
 void
-ApplicationImpl::generateLoad(bool isCreate, uint32_t nAccounts,
+ApplicationImpl::generateLoad(LoadGenMode mode, uint32_t nAccounts,
                               uint32_t offset, uint32_t nTxs, uint32_t txRate,
                               uint32_t batchSize,
                               std::chrono::seconds spikeInterval,
                               uint32_t spikeSize)
 {
     getMetrics().NewMeter({"loadgen", "run", "start"}, "run").Mark();
-    getLoadGenerator().generateLoad(isCreate, nAccounts, offset, nTxs, txRate,
+    getLoadGenerator().generateLoad(mode, nAccounts, offset, nTxs, txRate,
                                     batchSize, spikeInterval, spikeSize);
 }
 
