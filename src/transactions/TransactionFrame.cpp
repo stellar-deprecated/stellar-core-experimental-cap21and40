@@ -526,15 +526,6 @@ TransactionFrame::commonValidPreSeqNum(AbstractLedgerTxn& ltx, bool chargeFee,
         return false;
     }
 
-    auto extraSigners = getExtraSigners();
-    for (size_t i = 0; i < extraSigners.size(); i++)
-    {
-        if (!checkSignatureExtraSigner(signatureChecker, extraSigners[i]))
-        {
-            getResult().result.code(txBAD_AUTH);
-            return false;
-        }
-    }
     return true;
 }
 
@@ -666,6 +657,17 @@ TransactionFrame::commonValid(SignatureChecker& signatureChecker,
                               upperBoundCloseTimeOffset))
     {
         return res;
+    }
+
+    // TODO STARLIGHT - right place for this? (moved from commonValidPreSeqNum during conflict resolve)
+    auto extraSigners = getExtraSigners();
+    for (size_t i = 0; i < extraSigners.size(); i++)
+    {
+        if (!checkSignatureExtraSigner(signatureChecker, extraSigners[i]))
+        {
+            getResult().result.code(txBAD_AUTH);
+            return res;
+        }
     }
 
     auto header = ltx.loadHeader();
