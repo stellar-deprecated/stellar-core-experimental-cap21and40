@@ -659,7 +659,6 @@ TransactionFrame::commonValid(SignatureChecker& signatureChecker,
         return res;
     }
 
-    // TODO STARLIGHT - right place for this? (moved from commonValidPreSeqNum during conflict resolve)
     auto extraSigners = getExtraSigners();
     for (size_t i = 0; i < extraSigners.size(); i++)
     {
