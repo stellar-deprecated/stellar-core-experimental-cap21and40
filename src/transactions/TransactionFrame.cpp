@@ -672,6 +672,22 @@ TransactionFrame::commonValid(SignatureChecker& signatureChecker,
     auto header = ltx.loadHeader();
     auto sourceAccount = loadSourceAccount(ltx, header);
 
+    // TODO: Answer the question, does these validations belong here? This
+    // function has a comment stating that the validations within are
+    // independent of account state. This validation is clearly dependent on
+    // account state, but then again, the validation immediately above is also
+    // dependent on account state, so it is unclear how meaningful that comment
+    // is. If this code doesn't belong here maybe it belongs in commonValid. The
+    // thing I like about putting it here though is that this check much occur
+    // prior to sequence number update and must circumvent it, so from a
+    // conceptual point-of-view it seems to belong here.
+    if (isTooEarlyForAccount(sourceAccount.current().data.account(), header,
+                             lowerBoundCloseTimeOffset))
+    {
+        getResult().result.code(txTOO_EARLY);
+        return res;
+    }
+
     // in older versions, the account's sequence number is updated when taking
     // fees
     if (header.current().ledgerVersion >= 10 || !applying)
