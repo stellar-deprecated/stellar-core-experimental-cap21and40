@@ -533,7 +533,7 @@ TransactionFrame::commonValidPreSeqNum(SignatureChecker& signatureChecker,
         if (!checkSignatureExtraSigner(signatureChecker, extraSigners[i]))
         {
             getResult().result.code(txBAD_AUTH);
-            return res;
+            return false;
         }
     }
 
@@ -548,7 +548,7 @@ TransactionFrame::commonValidPreSeqNum(SignatureChecker& signatureChecker,
                              lowerBoundCloseTimeOffset))
     {
         getResult().result.code(txTOO_EARLY);
-        return res;
+        return false;
     }
 
     return true;
