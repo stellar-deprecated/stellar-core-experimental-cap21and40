@@ -75,7 +75,8 @@ class TransactionFrame : public TransactionFrameBase
                                       LedgerTxnHeader const& header,
                                       uint64_t lowerBoundCloseTimeOffset);
 
-    bool commonValidPreSeqNum(AbstractLedgerTxn& ltx, bool chargeFee,
+    bool commonValidPreSeqNum(SignatureChecker& signatureChecker,
+                              AbstractLedgerTxn& ltx, bool chargeFee,
                               uint64_t lowerBoundCloseTimeOffset,
                               uint64_t upperBoundCloseTimeOffset);
 

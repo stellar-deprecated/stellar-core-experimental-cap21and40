@@ -481,7 +481,8 @@ TransactionFrame::isTooEarlyForAccount(AccountEntry sourceAccount,
 }
 
 bool
-TransactionFrame::commonValidPreSeqNum(AbstractLedgerTxn& ltx, bool chargeFee,
+TransactionFrame::commonValidPreSeqNum(SignatureChecker& signatureChecker,
+                                       AbstractLedgerTxn& ltx, bool chargeFee,
                                        uint64_t lowerBoundCloseTimeOffset,
                                        uint64_t upperBoundCloseTimeOffset)
 {
@@ -524,6 +525,29 @@ TransactionFrame::commonValidPreSeqNum(AbstractLedgerTxn& ltx, bool chargeFee,
     {
         getResult().result.code(txINSUFFICIENT_FEE);
         return false;
+    }
+
+    auto extraSigners = getExtraSigners();
+    for (size_t i = 0; i < extraSigners.size(); i++)
+    {
+        if (!checkSignatureExtraSigner(signatureChecker, extraSigners[i]))
+        {
+            getResult().result.code(txBAD_AUTH);
+            return res;
+        }
+    }
+
+    if (!loadSourceAccount(ltx, header))
+    {
+        getResult().result.code(txNO_ACCOUNT);
+        return false;
+    }
+
+    if (isTooEarlyForAccount(sourceAccount.current().data.account(), header,
+                             lowerBoundCloseTimeOffset))
+    {
+        getResult().result.code(txTOO_EARLY);
+        return res;
     }
 
     return true;
@@ -653,40 +677,15 @@ TransactionFrame::commonValid(SignatureChecker& signatureChecker,
             "Applying transaction with non-current closeTime");
     }
 
-    if (!commonValidPreSeqNum(ltx, chargeFee, lowerBoundCloseTimeOffset,
+    if (!commonValidPreSeqNum(signatureChecker, ltx, chargeFee,
+                              lowerBoundCloseTimeOffset,
                               upperBoundCloseTimeOffset))
     {
         return res;
     }
 
-    auto extraSigners = getExtraSigners();
-    for (size_t i = 0; i < extraSigners.size(); i++)
-    {
-        if (!checkSignatureExtraSigner(signatureChecker, extraSigners[i]))
-        {
-            getResult().result.code(txBAD_AUTH);
-            return res;
-        }
-    }
-
     auto header = ltx.loadHeader();
     auto sourceAccount = loadSourceAccount(ltx, header);
-
-    // TODO: Answer the question, does these validations belong here? This
-    // function has a comment stating that the validations within are
-    // independent of account state. This validation is clearly dependent on
-    // account state, but then again, the validation immediately above is also
-    // dependent on account state, so it is unclear how meaningful that comment
-    // is. If this code doesn't belong here maybe it belongs in commonValid. The
-    // thing I like about putting it here though is that this check much occur
-    // prior to sequence number update and must circumvent it, so from a
-    // conceptual point-of-view it seems to belong here.
-    if (isTooEarlyForAccount(sourceAccount.current().data.account(), header,
-                             lowerBoundCloseTimeOffset))
-    {
-        getResult().result.code(txTOO_EARLY);
-        return res;
-    }
 
     // in older versions, the account's sequence number is updated when taking
     // fees
