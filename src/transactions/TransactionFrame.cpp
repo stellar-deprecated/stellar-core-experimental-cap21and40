@@ -537,7 +537,8 @@ TransactionFrame::commonValidPreSeqNum(SignatureChecker& signatureChecker,
         }
     }
 
-    if (!loadSourceAccount(ltx, header))
+    auto sourceAccount = loadSourceAccount(ltx, header);
+    if (!sourceAccount)
     {
         getResult().result.code(txNO_ACCOUNT);
         return false;
