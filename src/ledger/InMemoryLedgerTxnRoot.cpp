@@ -27,7 +27,7 @@ InMemoryLedgerTxnRoot::InMemoryLedgerTxnRoot(
 }
 
 void
-InMemoryLedgerTxnRoot::addChild(AbstractLedgerTxn& child)
+InMemoryLedgerTxnRoot::addChild(AbstractLedgerTxn& child, TransactionMode mode)
 {
 }
 
@@ -65,6 +65,13 @@ InMemoryLedgerTxnRoot::getBestOffer(Asset const& buying, Asset const& selling,
 UnorderedMap<LedgerKey, LedgerEntry>
 InMemoryLedgerTxnRoot::getOffersByAccountAndAsset(AccountID const& account,
                                                   Asset const& asset)
+{
+    return UnorderedMap<LedgerKey, LedgerEntry>();
+}
+
+UnorderedMap<LedgerKey, LedgerEntry>
+InMemoryLedgerTxnRoot::getPoolShareTrustLinesByAccountAndAsset(
+    AccountID const& account, Asset const& asset)
 {
     return UnorderedMap<LedgerKey, LedgerEntry>();
 }
@@ -147,6 +154,10 @@ uint32_t
 InMemoryLedgerTxnRoot::prefetch(UnorderedSet<LedgerKey> const& keys)
 {
     return 0;
+}
+
+void InMemoryLedgerTxnRoot::prepareNewObjects(size_t)
+{
 }
 
 #ifdef BUILD_TESTS

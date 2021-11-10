@@ -252,6 +252,9 @@
     <ClCompile Include="..\..\src\simulation\Topologies.cpp">
       <Filter>simulation</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\simulation\test\LoadGeneratorTests.cpp">
+      <Filter>simulation</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\src\scp\SCP.cpp">
       <Filter>scp</Filter>
     </ClCompile>
@@ -807,6 +810,15 @@
     <ClCompile Include="..\..\src\transactions\test\SetTrustLineFlagsTests.cpp">
       <Filter>transactions\tests</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\transactions\test\LiquidityPoolDepositTests.cpp">
+      <Filter>transactions\tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\transactions\test\LiquidityPoolWithdrawTests.cpp">
+      <Filter>transactions\tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\transactions\test\LiquidityPoolTradeTests.cpp">
+      <Filter>transactions\tests</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\src\transactions\test\SignatureUtilsTest.cpp">
       <Filter>transactions\tests</Filter>
     </ClCompile>
@@ -862,6 +874,12 @@
       <Filter>transactions</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\transactions\SetTrustLineFlagsOpFrame.cpp">
+      <Filter>transactions</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\transactions\LiquidityPoolDepositOpFrame.cpp">
+      <Filter>transactions</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\transactions\LiquidityPoolWithdrawOpFrame.cpp">
       <Filter>transactions</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\transactions\SignatureChecker.cpp">
@@ -1190,6 +1208,9 @@
     </ClCompile>
     <ClCompile Include="..\..\src\ledger\LedgerTxnLiquidityPoolSQL.cpp">
       <Filter>ledger</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\main\Diagnostics.cpp">
+      <Filter>main</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -1790,6 +1811,12 @@
     <ClInclude Include="..\..\src\transactions\SetTrustLineFlagsOpFrame.h">
       <Filter>transactions</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\transactions\LiquidityPoolDepositOpFrame.h">
+      <Filter>transactions</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\transactions\LiquidityPoolWithdrawOpFrame.h">
+      <Filter>transactions</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\transactions\SignatureChecker.h">
       <Filter>transactions</Filter>
     </ClInclude>
@@ -2071,6 +2098,9 @@
     </ClInclude>
     <ClInclude Include="..\..\src\historywork\CheckSingleLedgerHeaderWork.h">
       <Filter>historyWork</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\main\Diagnostics.h">
+      <Filter>main</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

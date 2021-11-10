@@ -35,7 +35,7 @@ populateLoadedEntries(UnorderedSet<LedgerKey> const& keys,
         auto key = LedgerEntryKey(le);
 
         // Abort if two entries for the same key appear.
-        assert(res.find(key) == res.end());
+        releaseAssert(res.find(key) == res.end());
 
         // Only return entries for keys that were actually requested.
         if (keys.find(key) != keys.end())
@@ -223,18 +223,21 @@ AbstractLedgerTxn::~AbstractLedgerTxn()
 
 // Implementation of LedgerTxn ----------------------------------------------
 LedgerTxn::LedgerTxn(AbstractLedgerTxnParent& parent,
-                     bool shouldUpdateLastModified)
-    : mImpl(std::make_unique<Impl>(*this, parent, shouldUpdateLastModified))
+                     bool shouldUpdateLastModified, TransactionMode mode)
+    : mImpl(
+          std::make_unique<Impl>(*this, parent, shouldUpdateLastModified, mode))
 {
 }
 
-LedgerTxn::LedgerTxn(LedgerTxn& parent, bool shouldUpdateLastModified)
-    : LedgerTxn((AbstractLedgerTxnParent&)parent, shouldUpdateLastModified)
+LedgerTxn::LedgerTxn(LedgerTxn& parent, bool shouldUpdateLastModified,
+                     TransactionMode mode)
+    : LedgerTxn((AbstractLedgerTxnParent&)parent, shouldUpdateLastModified,
+                mode)
 {
 }
 
 LedgerTxn::Impl::Impl(LedgerTxn& self, AbstractLedgerTxnParent& parent,
-                      bool shouldUpdateLastModified)
+                      bool shouldUpdateLastModified, TransactionMode mode)
     : mParent(parent)
     , mChild(nullptr)
     , mHeader(std::make_unique<LedgerHeader>(mParent.getHeader()))
@@ -242,7 +245,7 @@ LedgerTxn::Impl::Impl(LedgerTxn& self, AbstractLedgerTxnParent& parent,
     , mIsSealed(false)
     , mConsistency(LedgerTxnConsistency::EXACT)
 {
-    mParent.addChild(self);
+    mParent.addChild(self, mode);
 }
 
 LedgerTxn::~LedgerTxn()
@@ -264,7 +267,7 @@ LedgerTxn::getImpl() const
 }
 
 void
-LedgerTxn::addChild(AbstractLedgerTxn& child)
+LedgerTxn::addChild(AbstractLedgerTxn& child, TransactionMode mode)
 {
     getImpl()->addChild(child);
 }
@@ -1008,7 +1011,7 @@ LedgerTxn::Impl::getChanges()
                 // If !entry and !previous.entry then the entry was created and
                 // erased in this LedgerTxn, in which case it should not still
                 // be in this LedgerTxn
-                assert(entry);
+                releaseAssert(entry);
                 changes.emplace_back(LEDGER_ENTRY_CREATED);
                 changes.back().created() = entry->ledgerEntry();
             }
@@ -1331,6 +1334,70 @@ LedgerTxn::Impl::getOffersByAccountAndAsset(AccountID const& account,
     return offers;
 }
 
+UnorderedMap<LedgerKey, LedgerEntry>
+LedgerTxn::getPoolShareTrustLinesByAccountAndAsset(AccountID const& account,
+                                                   Asset const& asset)
+{
+    return getImpl()->getPoolShareTrustLinesByAccountAndAsset(account, asset);
+}
+
+UnorderedMap<LedgerKey, LedgerEntry>
+LedgerTxn::Impl::getPoolShareTrustLinesByAccountAndAsset(
+    AccountID const& account, Asset const& asset)
+{
+    auto trustLines =
+        mParent.getPoolShareTrustLinesByAccountAndAsset(account, asset);
+    for (auto const& kv : mEntry)
+    {
+        if (kv.first.type() != InternalLedgerEntryType::LEDGER_ENTRY)
+        {
+            continue;
+        }
+
+        auto const& key = kv.first.ledgerKey();
+        if (key.type() == TRUSTLINE && key.trustLine().accountID == account &&
+            key.trustLine().asset.type() == ASSET_TYPE_POOL_SHARE)
+        {
+            if (!kv.second)
+            {
+                // The trust line was in our result set from a parent, but was
+                // deleted in self
+                trustLines.erase(key);
+            }
+            else
+            {
+                auto iter = trustLines.find(key);
+                if (iter != trustLines.end())
+                {
+                    // The trust line was in our result set from a parent, and
+                    // was updated in self
+                    iter->second = kv.second->ledgerEntry();
+                }
+                else
+                {
+                    // The trust line wasn't in our result set, and was updated
+                    // in self. We need to check the corresponding LiquidityPool
+                    // to find its constituent assets.
+                    auto newest = getNewestVersion(liquidityPoolKey(
+                        key.trustLine().asset.liquidityPoolID()));
+                    if (!newest)
+                    {
+                        throw std::runtime_error("Invalid ledger state");
+                    }
+
+                    auto const& lp = newest->ledgerEntry().data.liquidityPool();
+                    auto const& cp = lp.body.constantProduct();
+                    if (cp.params.assetA == asset || cp.params.assetB == asset)
+                    {
+                        trustLines.emplace(key, kv.second->ledgerEntry());
+                    }
+                }
+            }
+        }
+    }
+    return trustLines;
+}
+
 LedgerTxnEntry
 LedgerTxn::load(InternalLedgerKey const& key)
 {
@@ -1549,6 +1616,44 @@ LedgerTxn::Impl::loadOffersByAccountAndAsset(LedgerTxn& self,
         // std::less<LedgerKey>, so this should not throw when swapped)
         mEntry.swap(previousEntries);
         mMultiOrderBook.swap(previousMultiOrderBook);
+        throw;
+    }
+}
+
+std::vector<LedgerTxnEntry>
+LedgerTxn::loadPoolShareTrustLinesByAccountAndAsset(AccountID const& account,
+                                                    Asset const& asset)
+{
+    return getImpl()->loadPoolShareTrustLinesByAccountAndAsset(*this, account,
+                                                               asset);
+}
+
+std::vector<LedgerTxnEntry>
+LedgerTxn::Impl::loadPoolShareTrustLinesByAccountAndAsset(
+    LedgerTxn& self, AccountID const& account, Asset const& asset)
+{
+    throwIfSealed();
+    throwIfChild();
+
+    auto previousEntries = mEntry;
+    auto trustLines = getPoolShareTrustLinesByAccountAndAsset(account, asset);
+    try
+    {
+        std::vector<LedgerTxnEntry> res;
+        res.reserve(trustLines.size());
+        for (auto const& kv : trustLines)
+        {
+            auto const& key = kv.first;
+            res.emplace_back(load(self, key));
+        }
+        return res;
+    }
+    catch (...)
+    {
+        // For associative containers, swap does not throw unless the exception
+        // is thrown by the swap of the Compare object (which is of type
+        // std::less<LedgerKey>, so this should not throw when swapped)
+        mEntry.swap(previousEntries);
         throw;
     }
 }
@@ -2023,6 +2128,28 @@ LedgerTxn::Impl::hasSponsorshipEntry() const
     return false;
 }
 
+void
+LedgerTxn::prepareNewObjects(size_t s)
+{
+    getImpl()->prepareNewObjects(s);
+}
+
+void
+LedgerTxn::Impl::prepareNewObjects(size_t s)
+{
+    size_t newSize = mEntry.size();
+    auto constexpr m = std::numeric_limits<size_t>::max();
+    if (newSize >= m - s)
+    {
+        newSize = m;
+    }
+    else
+    {
+        newSize += s;
+    }
+    mEntry.reserve(newSize);
+}
+
 #ifdef BUILD_TESTS
 UnorderedMap<AssetPair,
              std::multimap<OfferDescriptor, LedgerKey, IsBetterOfferComparator>,
@@ -2147,7 +2274,7 @@ LedgerTxnRoot::Impl::Impl(Database& db, size_t entryCacheSize,
                           )
     : mMaxBestOffersBatchSize(
           std::min(std::max(prefetchBatchSize, MIN_BEST_OFFERS_BATCH_SIZE),
-                   MAX_OFFERS_TO_CROSS))
+                   getMaxOffersToCross()))
     , mDatabase(db)
     , mHeader(std::make_unique<LedgerHeader>())
     , mEntryCache(entryCacheSize)
@@ -2187,19 +2314,31 @@ LedgerTxnRoot::resetForFuzzer()
 #endif // BUILD_TESTS
 
 void
-LedgerTxnRoot::addChild(AbstractLedgerTxn& child)
+LedgerTxnRoot::addChild(AbstractLedgerTxn& child, TransactionMode mode)
 {
-    mImpl->addChild(child);
+    mImpl->addChild(child, mode);
 }
 
 void
-LedgerTxnRoot::Impl::addChild(AbstractLedgerTxn& child)
+LedgerTxnRoot::Impl::addChild(AbstractLedgerTxn& child, TransactionMode mode)
 {
     if (mChild)
     {
         throw std::runtime_error("LedgerTxnRoot already has child");
     }
-    mTransaction = std::make_unique<soci::transaction>(mDatabase.getSession());
+
+    if (mode == TransactionMode::READ_WRITE_WITH_SQL_TXN)
+    {
+        mTransaction =
+            std::make_unique<soci::transaction>(mDatabase.getSession());
+    }
+    else
+    {
+        // Read-only transactions are only allowed on the main thread to ensure
+        // we're not competing with writes
+        assertThreadIsMain();
+    }
+
     mChild = &child;
 }
 
@@ -2345,6 +2484,16 @@ void
 LedgerTxnRoot::Impl::commitChild(EntryIterator iter, LedgerTxnConsistency cons)
 {
     ZoneScoped;
+
+    // In this mode, where we do not start a SQL transaction, so we crash if
+    // there's an attempt to commit, since the expected behavior is load and
+    // rollback.
+    if (!mTransaction)
+    {
+        throw std::runtime_error("Illegal action in LedgerTxnRoot: committing "
+                                 "child in read-only mode");
+    }
+
     // Assignment of xdrpp objects does not have the strong exception safety
     // guarantee, so use std::unique_ptr<...>::swap to achieve it
     auto childHeader = std::make_unique<LedgerHeader>(mChild->getHeader());
@@ -2644,6 +2793,16 @@ LedgerTxnRoot::Impl::getPrefetchHitRate() const
            (mPrefetchMisses + mPrefetchHits);
 }
 
+void
+LedgerTxnRoot::prepareNewObjects(size_t s)
+{
+    mImpl->prepareNewObjects(s);
+}
+
+void LedgerTxnRoot::Impl::prepareNewObjects(size_t)
+{
+}
+
 UnorderedMap<LedgerKey, LedgerEntry>
 LedgerTxnRoot::getAllOffers()
 {
@@ -2921,7 +3080,7 @@ LedgerTxnRoot::Impl::getBestOffer(Asset const& buying, Asset const& selling,
 
     if (iter != offers.cend())
     {
-        assert(!worseThan || isBetterOffer(*worseThan, *iter));
+        releaseAssert(!worseThan || isBetterOffer(*worseThan, *iter));
 
         // Check if we didn't prefetch and that we're missing
         // accounts/trustlines for this offer in the cache. If we are, batch
@@ -2937,11 +3096,10 @@ LedgerTxnRoot::Impl::getBestOffer(Asset const& buying, Asset const& selling,
             populateEntryCacheFromBestOffers(iter, lastOfferIter);
         }
 
-        putInEntryCache(LedgerEntryKey(*iter),
-                        std::make_shared<LedgerEntry const>(*iter),
-                        LoadType::IMMEDIATE);
+        auto le = std::make_shared<LedgerEntry const>(*iter);
+        putInEntryCache(LedgerEntryKey(*iter), le, LoadType::IMMEDIATE);
 
-        return std::make_shared<LedgerEntry const>(*iter);
+        return le;
     }
     return nullptr;
 }
@@ -2979,6 +3137,47 @@ LedgerTxnRoot::Impl::getOffersByAccountAndAsset(AccountID const& account,
     for (auto const& offer : offers)
     {
         res.emplace(LedgerEntryKey(offer), offer);
+    }
+    return res;
+}
+
+UnorderedMap<LedgerKey, LedgerEntry>
+LedgerTxnRoot::getPoolShareTrustLinesByAccountAndAsset(AccountID const& account,
+                                                       Asset const& asset)
+{
+    return mImpl->getPoolShareTrustLinesByAccountAndAsset(account, asset);
+}
+
+UnorderedMap<LedgerKey, LedgerEntry>
+LedgerTxnRoot::Impl::getPoolShareTrustLinesByAccountAndAsset(
+    AccountID const& account, Asset const& asset)
+{
+    ZoneScoped;
+    std::vector<LedgerEntry> trustLines;
+    try
+    {
+        trustLines = loadPoolShareTrustLinesByAccountAndAsset(account, asset);
+    }
+    catch (NonSociRelatedException&)
+    {
+        throw;
+    }
+    catch (std::exception& e)
+    {
+        printErrorAndAbort("fatal error when getting pool share trust lines by "
+                           "account and asset from LedgerTxnRoot: ",
+                           e.what());
+    }
+    catch (...)
+    {
+        printErrorAndAbort("unknown fatal error when getting offers by account "
+                           "and asset from LedgerTxnRoot");
+    }
+
+    UnorderedMap<LedgerKey, LedgerEntry> res(trustLines.size());
+    for (auto const& tl : trustLines)
+    {
+        res.emplace(LedgerEntryKey(tl), tl);
     }
     return res;
 }
@@ -3078,15 +3277,8 @@ LedgerTxnRoot::Impl::getNewestVersion(InternalLedgerKey const& gkey) const
             throw std::runtime_error("Unknown key type");
         }
     }
-    catch (NonSociRelatedException& e)
+    catch (NonSociRelatedException&)
     {
-        if (getHeader().ledgerVersion <= 14)
-        {
-            printErrorAndAbort(
-                "fatal error when loading ledger entry from LedgerTxnRoot: ",
-                e.what());
-        }
-
         throw;
     }
     catch (std::exception& e)
@@ -3121,20 +3313,24 @@ LedgerTxnRoot::rollbackChild()
 void
 LedgerTxnRoot::Impl::rollbackChild()
 {
-    try
+    if (mTransaction)
     {
-        mTransaction->rollback();
-        mTransaction.reset();
-    }
-    catch (std::exception& e)
-    {
-        printErrorAndAbort(
-            "fatal error when rolling back child of LedgerTxnRoot: ", e.what());
-    }
-    catch (...)
-    {
-        printErrorAndAbort(
-            "unknown fatal error when rolling back child of LedgerTxnRoot");
+        try
+        {
+            mTransaction->rollback();
+            mTransaction.reset();
+        }
+        catch (std::exception& e)
+        {
+            printErrorAndAbort(
+                "fatal error when rolling back child of LedgerTxnRoot: ",
+                e.what());
+        }
+        catch (...)
+        {
+            printErrorAndAbort(
+                "unknown fatal error when rolling back child of LedgerTxnRoot");
+        }
     }
 
     mChild = nullptr;

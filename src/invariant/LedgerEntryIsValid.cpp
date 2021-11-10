@@ -7,6 +7,7 @@
 #include "ledger/LedgerTxn.h"
 #include "main/Application.h"
 #include "transactions/TransactionUtils.h"
+#include "util/GlobalChecks.h"
 #include "xdrpp/printer.h"
 #include <fmt/format.h>
 
@@ -117,7 +118,7 @@ LedgerEntryIsValid::checkIsValid(LedgerEntry const& le,
         {
             return "LiquidityPool is sponsored";
         }
-        return checkIsValid(le.data.liquidityPool(), version);
+        return checkIsValid(le.data.liquidityPool(), previous, version);
     default:
         return "LedgerEntry has invalid type";
     }
@@ -167,35 +168,24 @@ LedgerEntryIsValid::checkIsValid(AccountEntry const& ae, uint32 version) const
         }
     }
 
-    // TODO: Figure out what to do with these invariant checks. I've commented
-    // them because there are many tests that create accounts, and so execute
-    // transactions, on the latest protocol where the extensions exist, but then
-    // proceed to downgrade to an older protocol for the assertions. This has
-    // worked up until now because the extensions have not been activated except
-    // in specific cases. Now the extensions are activated on a change in
-    // sequence number, and so they are created during test setup and cause
-    // older protocol tests to fail because of these checks.
-    //
-    // if (hasAccountEntryExtV2(ae))
-    // {
-    //     if (version < 14)
-    //     {
-    //         return "Account has v2 extension before protocol version 14";
-    //     }
-    //     auto const& extV2 = ae.ext.v1().ext.v2();
-    //     if (ae.signers.size() != extV2.signerSponsoringIDs.size())
-    //     {
-    //         return "Account signers not paired with signerSponsoringIDs";
-    //     }
-    // }
-    //
-    // if (hasAccountEntryExtV3(ae))
-    // {
-    //     if (version < 16)
-    //     {
-    //         return "Account has v3 extension before protocol version 16";
-    //     }
-    // }
+    if (hasAccountEntryExtV2(ae))
+    {
+        if (version < 14)
+        {
+            return "Account has v2 extension before protocol version 14";
+        }
+        auto const& extV2 = ae.ext.v1().ext.v2();
+        if (ae.signers.size() != extV2.signerSponsoringIDs.size())
+        {
+            return "Account signers not paired with signerSponsoringIDs";
+        }
+
+        if (version >= 18 &&
+            ae.numSubEntries > UINT32_MAX - extV2.numSponsoring)
+        {
+            return "Account numSubEntries + numSponsoring is > UINT32_MAX";
+        }
+    }
     return {};
 }
 
@@ -217,6 +207,17 @@ LedgerEntryIsValid::checkIsValid(TrustLineEntry const& tl,
          tl.ext.v1().liabilities.selling != 0))
     {
         return "Pool share TrustLine has liabilities";
+    }
+    if (hasTrustLineEntryExtV2(tl))
+    {
+        if (version < 18)
+        {
+            return "TrustLine has v2 extension before protocol version 18";
+        }
+        if (tl.ext.v1().ext.v2().liquidityPoolUseCount < 0)
+        {
+            return "TrustLine liquidityPoolUseCount is negative";
+        }
     }
     if (tl.balance < 0)
     {
@@ -363,7 +364,7 @@ LedgerEntryIsValid::checkIsValid(ClaimableBalanceEntry const& cbe,
 
     if (previous)
     {
-        assert(previous->data.type() == CLAIMABLE_BALANCE);
+        releaseAssert(previous->data.type() == CLAIMABLE_BALANCE);
         auto const& previousCbe = previous->data.claimableBalance();
 
         if (!(cbe == previousCbe))
@@ -398,13 +399,20 @@ LedgerEntryIsValid::checkIsValid(ClaimableBalanceEntry const& cbe,
 
 std::string
 LedgerEntryIsValid::checkIsValid(LiquidityPoolEntry const& lp,
+                                 LedgerEntry const* previous,
                                  uint32 version) const
 {
     if (version < 18)
     {
         return "LiquidityPools are only valid from V18";
     }
-    auto const cp = lp.body.constantProduct();
+
+    if (lp.body.type() != LIQUIDITY_POOL_CONSTANT_PRODUCT)
+    {
+        return "LiquidityPool type must be constant product";
+    }
+
+    auto const& cp = lp.body.constantProduct();
     if (!isAssetValid(cp.params.assetA, version))
     {
         return "LiquidityPool assetA is invalid";
@@ -438,6 +446,27 @@ LedgerEntryIsValid::checkIsValid(LiquidityPoolEntry const& lp,
     {
         return "LiquidityPool poolSharesTrustLineCount is negative";
     }
+
+    if (previous)
+    {
+        if (previous->data.type() != LIQUIDITY_POOL)
+        {
+            return "LiquidityPool used to be of different type";
+        }
+
+        auto const& lpPrev = previous->data.liquidityPool();
+        if (lpPrev.body.type() != lp.body.type())
+        {
+            return "LiquidityPool body changed type";
+        }
+
+        if (!(lpPrev.body.constantProduct().params ==
+              lp.body.constantProduct().params))
+        {
+            return "LiquidityPool parameters changed";
+        }
+    }
+
     return {};
 }
 }
